@@ -241,6 +241,7 @@ export default function WorkflowCanvas() {
 
   const onPaneClick = useCallback(() => {
     setSelectedNode(null);
+    setCtxMenu(null);
   }, [setSelectedNode]);
 
   const onPaneContextMenu = useCallback(
