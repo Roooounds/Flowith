@@ -5,6 +5,7 @@ import {
   Controls,
   MiniMap,
   BackgroundVariant,
+  SelectionMode,
   type OnConnect,
   type OnConnectStart,
   type OnConnectEnd,
@@ -27,6 +28,7 @@ import type { BossNode, BossEdge } from "@/types/canvas";
 export default function WorkflowCanvas() {
   const t = useT();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeId?: string } | null>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const {
     canvasNodes,
     canvasEdges,
@@ -36,7 +38,7 @@ export default function WorkflowCanvas() {
     addNode,
     addEdge,
   } = useProjectStore();
-  const { screenToFlowPosition, setCenter, getZoom, getViewport, setViewport } = useReactFlow();
+  const { screenToFlowPosition, setCenter, getZoom, getViewport, setViewport, fitView } = useReactFlow();
 
   // Save viewport before centering on a selected node, so we can restore on deselect
   const savedViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null);
@@ -53,7 +55,7 @@ export default function WorkflowCanvas() {
   const pasteNodes = useProjectStore((s) => s.pasteNodes);
   const selectAllNodes = useProjectStore((s) => s.selectAllNodes);
 
-  // ── Keyboard shortcuts ──────────────────────────────────────────
+  // ── Keyboard shortcuts (ComfyUI-style) ──────────────────────────
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -79,65 +81,97 @@ export default function WorkflowCanvas() {
       } else if (mod && e.key === "a" && !e.shiftKey) {
         e.preventDefault();
         selectAllNodes();
+      } else if (mod && e.key === "Enter") {
+        e.preventDefault();
+        useProjectStore.getState().runWorkflow();
+      } else if (e.key === "f" && !mod) {
+        e.preventDefault();
+        fitView({ duration: 200, padding: 0.2 });
+      } else if (e.key === "h" && !mod) {
+        e.preventDefault();
+        fitView({ duration: 200, padding: 0.2 });
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo, copyNodes, cutNodes, pasteNodes, selectAllNodes]);
 
-  // Full position sync when layout changes
+  // Full position sync when layout changes (auto-layout)
   useEffect(() => {
     setNodes(canvasNodes);
     setEdges(canvasEdges);
   }, [layoutVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync structural and data changes (add/remove/update) without resetting positions
+  // Sync structural changes — preserve all local React Flow internal state
+  // (positions, measured dimensions, dragging state, etc.)
   useEffect(() => {
     setNodes((nds) => {
       const canvasById = new Map(canvasNodes.map((n) => [n.id, n]));
-      const localIds = new Set(nds.map((n) => n.id));
+      const localById = new Map(nds.map((n) => [n.id, n]));
+      const localIds = new Set(localById.keys());
       const canvasIds = new Set(canvasById.keys());
 
-      // Detect changes: new, removed, or data updated
-      const hasChanges =
-        nds.some((n) => !canvasIds.has(n.id)) || // removed
-        canvasNodes.some((n) => !localIds.has(n.id)); // added
-
-      if (!hasChanges) {
-        // Check for data updates on existing nodes
-        const dataChanged = nds.some((n) => {
-          const cn = canvasById.get(n.id);
-          return cn && cn !== n && JSON.stringify(cn.data) !== JSON.stringify(n.data);
-        });
-        if (!dataChanged) return nds;
-      }
-
-      // Rebuild: keep local positions, take store data
-      return canvasNodes.map((cn) => {
-        const local = nds.find((n) => n.id === cn.id);
-        return local ? { ...cn, position: local.position } : cn;
+      // New nodes added to store
+      const added = canvasNodes.filter((n) => !localIds.has(n.id));
+      // Nodes removed from store
+      const removed = nds.some((n) => !canvasIds.has(n.id));
+      // Data changes on existing nodes
+      const dataChanged = nds.some((n) => {
+        const cn = canvasById.get(n.id);
+        return cn && JSON.stringify(cn.data) !== JSON.stringify(n.data);
       });
+      // Selection changes (e.g. select-all from store)
+      const selectedChanged = nds.some((n) => {
+        const cn = canvasById.get(n.id);
+        return cn && cn.selected !== n.selected;
+      });
+
+      if (!added.length && !removed && !dataChanged && !selectedChanged) return nds;
+
+      // Rebuild: preserve existing nodes in place (keeps React Flow internals),
+      // add new nodes from store, update data from store on existing nodes
+      const result = canvasNodes.map((cn) => {
+        const local = localById.get(cn.id);
+        if (local) {
+          // Keep local node object (position, measured size, etc.) but update
+          // data + selection from store (cn.selected always wins)
+          return { ...local, data: cn.data, selected: cn.selected };
+        }
+        return cn; // New node from store
+      });
+      return result;
     });
   }, [canvasNodes]);
 
+  // Edge sync: preserve local edges entirely (keeps React Flow internal state),
+  // only add new edges from store
   useEffect(() => {
     setEdges((eds) => {
-      const canvasById = new Map(canvasEdges.map((e) => [e.id, e]));
-      const localIds = new Set(eds.map((e) => e.id));
-      const canvasIds = new Set(canvasById.keys());
+      const localById = new Map(eds.map((e) => [e.id, e]));
+      const canvasIds = new Set(canvasEdges.map((e) => e.id));
 
-      const hasChanges =
-        eds.some((e) => !canvasIds.has(e.id)) ||
-        canvasEdges.some((e) => !localIds.has(e.id));
+      const added = canvasEdges.filter((e) => !localById.has(e.id));
+      const removed = eds.some((e) => !canvasIds.has(e.id));
 
-      if (!hasChanges) return eds;
+      if (!added.length && !removed) return eds;
 
-      return canvasEdges.map((ce) => {
-        const local = eds.find((e) => e.id === ce.id);
-        return local ? { ...ce, ...local, data: ce.data, label: ce.label, sourceHandle: ce.sourceHandle } : ce;
-      });
+      // Keep existing edges in place, add new ones from store
+      const existing = eds.filter((e) => canvasIds.has(e.id));
+      return [...existing, ...added];
     });
   }, [canvasEdges]);
+
+  // ResizeObserver: React Flow only responds to window resize, not layout changes.
+  // When sidebars toggle, the container changes size — we dispatch resize so RF re-measures.
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
   // Restore viewport when deselecting (right panel closes)
   useEffect(() => {
@@ -180,6 +214,20 @@ export default function WorkflowCanvas() {
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setNodes((nds) => applyNodeChanges(changes, nds) as BossNode[]);
+      // Sync React Flow selection state back to store so copy/cut/paste can read it
+      const selectChanges = changes.filter((c) => c.type === "select");
+      if (selectChanges.length === 0) return;
+      const store = useProjectStore.getState();
+      let changed = false;
+      const updated = store.canvasNodes.map((n) => {
+        const sc = selectChanges.find((c) => c.id === n.id);
+        if (sc && n.selected !== sc.selected) {
+          changed = true;
+          return { ...n, selected: sc.selected! };
+        }
+        return n;
+      });
+      if (changed) useProjectStore.setState({ canvasNodes: updated });
     },
     []
   );
@@ -259,6 +307,39 @@ export default function WorkflowCanvas() {
     setCtxMenu(null);
   }, [setSelectedNode]);
 
+  // ComfyUI: double-click on empty space opens search/add-node context menu.
+  // Use capture-phase dblclick to intercept BEFORE React Flow's internal zoom-to-fit handler.
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+    const onDblClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest(".react-flow__node") || target.closest(".react-flow__edge")) return;
+      e.stopPropagation();
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY });
+    };
+    container.addEventListener("dblclick", onDblClick, true);
+    return () => container.removeEventListener("dblclick", onDblClick, true);
+  }, []);
+
+  // Capture right-click on React Flow's selection box overlay (.react-flow__selection)
+  // which otherwise bypasses onPaneContextMenu and shows the browser's native menu.
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+    const onCtx = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Let onNodeContextMenu / onEdgeContextMenu handle clicks on nodes & edges
+      if (target.closest(".react-flow__node") || target.closest(".react-flow__edge")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setCtxMenu({ x: e.clientX, y: e.clientY });
+    };
+    container.addEventListener("contextmenu", onCtx, true);
+    return () => container.removeEventListener("contextmenu", onCtx, true);
+  }, []);
+
   const onPaneContextMenu = useCallback(
     (event: React.MouseEvent | MouseEvent) => {
       event.preventDefault();
@@ -306,6 +387,7 @@ export default function WorkflowCanvas() {
   if (nodes.length === 0) {
     return (
       <div
+        ref={canvasContainerRef}
         className="h-full w-full flex items-center justify-center bg-boss-bg"
         onDragOver={onDragOver}
         onDrop={onDrop}
@@ -348,6 +430,7 @@ export default function WorkflowCanvas() {
   // ── Canvas ──────────────────────────────────────────────────────
 
   return (
+    <div ref={canvasContainerRef} className="h-full w-full">
     <ReactFlow
       nodes={nodes}
       edges={edges}
@@ -367,9 +450,18 @@ export default function WorkflowCanvas() {
       defaultEdgeOptions={defaultEdgeOptions}
       edgesFocusable={true}
       edgesReconnectable={true}
-      selectionOnDrag={true}
+      // ComfyUI-style interactions
       panOnDrag={[1, 2]}
+      panActivationKeyCode="Space"
+      multiSelectionKeyCode="Shift"
+      deleteKeyCode={["Delete", "Backspace"]}
+      selectionOnDrag={true}
+      selectionMode={SelectionMode.Partial}
       selectNodesOnDrag={false}
+      autoPanOnNodeDrag={true}
+      autoPanOnConnect={true}
+      nodesDraggable={true}
+      nodesConnectable={true}
       fitView
       className="bg-boss-bg"
       proOptions={{ hideAttribution: true }}
@@ -411,6 +503,7 @@ export default function WorkflowCanvas() {
         />
       )}
     </ReactFlow>
+    </div>
   );
 }
 
