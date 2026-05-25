@@ -351,6 +351,8 @@ export default function WorkflowCanvas() {
       defaultEdgeOptions={defaultEdgeOptions}
       edgesFocusable={true}
       edgesReconnectable={true}
+      selectionOnDrag={true}
+      panOnDrag={[1]}
       fitView
       className="bg-boss-bg"
       proOptions={{ hideAttribution: true }}
