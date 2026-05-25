@@ -580,10 +580,9 @@ fn install_python(app: AppHandle) -> Result<(), String> {
             dep_status(&app, "python", "failed");
             return Err("Python install failed. Download from https://python.org".into());
         }
+        dep_status(&app, "python", "done");
+        log(&app, "Python installed successfully.");
     }
-
-    dep_status(&app, "python", "done");
-    log(&app, "Python installed successfully.");
     Ok(())
 }
 
@@ -634,9 +633,8 @@ fn install_git(app: AppHandle) -> Result<(), String> {
             return Err("Git install failed. Install manually: https://git-scm.com".into());
         }
         dep_status(&app, "git", "done");
+        Ok(())
     }
-
-    Ok(())
 }
 
 #[tauri::command]
