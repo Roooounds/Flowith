@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+_tmp_*
+
+# Python
+backend/__pycache__/
+__pycache__/
+*.pyc
+
+# Package locks (pnpm-lock.yaml should be committed, these are fallbacks)
+package-lock.json

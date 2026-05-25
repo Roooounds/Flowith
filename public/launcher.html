@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flowith Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0b0f;
+    --surface: #111318;
+    --border: #1e2130;
+    --border-active: #333850;
+    --text: #dcdde4;
+    --text-muted: #6b6f80;
+    --accent: #7c8aff;
+    --accent-dim: rgba(124,138,255,0.12);
+    --success: #3ecf8e;
+    --warning: #f0a040;
+    --error: #f44b6b;
+    --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    padding: 16px 32px 10px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .logo svg { width: 28px; height: 28px; }
+  .logo .mark { color: var(--accent); font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .tagline { color: var(--text-muted); font-size: 11px; letter-spacing: 0.5px; }
+
+  /* ─── System info card ─── */
+  .syscard {
+    margin: 8px 32px 0;
+    padding: 8px 16px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .syscard span { white-space: nowrap; }
+  .syscard .ok { color: var(--success); }
+  .syscard .warn { color: var(--warning); }
+
+  /* ─── Dependency list ─── */
+  .deps {
+    margin: 12px 32px 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .dep {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: border-color 0.3s;
+    min-height: 90px;
+  }
+  .dep.installing { border-color: var(--accent); }
+  .dep.done { border-color: var(--success); }
+  .dep.failed { border-color: var(--error); }
+  .dep.warning { border-color: var(--warning); }
+  .dep-row { display: flex; align-items: center; gap: 10px; }
+  .dep .icon {
+    width: 26px; height: 26px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+    background: var(--border);
+  }
+  .dep.done .icon { background: rgba(62,207,142,0.12); }
+  .dep.failed .icon { background: rgba(244,75,107,0.12); }
+  .dep.warning .icon { background: rgba(240,160,64,0.12); }
+  .dep.installing .icon { background: var(--accent-dim); }
+  .dep.optional { opacity: 0.7; }
+  .dep.optional .optional-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--border);
+    color: var(--text-muted);
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .dep .info { flex: 1; min-width: 0; }
+  .dep .name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .dep .desc { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+  .dep .status { font-size: 10px; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+  .dep .status.pending { color: var(--text-muted); }
+  .dep .status.installing { color: var(--accent); }
+  .dep .status.done { color: var(--success); }
+  .dep .status.failed { color: var(--error); }
+  .dep .status.warning { color: var(--warning); }
+  .dep .bar-wrap {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+    display: none;
+  }
+  .dep.installing .bar-wrap { display: block; }
+  .dep .bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+  .dep .actions { display: none; gap: 6px; }
+  .dep.failed .actions, .dep.warning .actions, .dep.ready .actions { display: flex; }
+  .dep.installing .actions { display: flex; }
+  .dep .btn {
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    transition: all 0.2s;
+    -webkit-app-region: no-drag;
+  }
+  .dep .btn:hover { border-color: var(--border-active); color: var(--text); }
+  .dep .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dep .btn.primary:hover { opacity: 0.9; }
+  .dep .btn.danger { border-color: var(--error); color: var(--error); }
+
+  /* ─── Terminal ─── */
+  .term-box {
+    flex: 1;
+    margin: 8px 32px 0;
+    border-radius: 10px 10px 0 0;
+    background: #06070a;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 120px;
+  }
+  .term-header {
+    padding: 6px 12px;
+    font-size: 10px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .term-header .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .term-header .dot.live { background: var(--success); }
+  .term-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--text-muted);
+    -webkit-app-region: no-drag;
+  }
+  .term-body .line { white-space: pre-wrap; word-break: break-all; }
+  .term-body .line::before { content: "> "; color: var(--accent); }
+
+  /* ─── Bottom bar ─── */
+  .footer {
+    padding: 12px 32px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .all-done {
+    font-size: 11px;
+    color: var(--success);
+    display: none;
+    align-items: center;
+    gap: 6px;
+  }
+  .actions-footer { display: flex; gap: 8px; margin-left: auto; }
+  .btn-foot {
+    padding: 8px 20px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    transition: all 0.2s;
+    -webkit-app-region: no-drag;
+  }
+  .btn-foot:hover { border-color: var(--border-active); color: var(--text); }
+  .btn-foot.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-foot.primary:hover { opacity: 0.9; }
+  .btn-foot.primary:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  /* ─── Tutorial Carousel ─── */
+  .tutorial {
+    margin: 12px 32px 0;
+    flex-shrink: 0;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .tutorial.visible { display: block; }
+  .tutorial-header {
+    padding: 6px 14px;
+    font-size: 10px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .tutorial-header .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .tutorial-slides {
+    position: relative;
+    min-height: 80px;
+    -webkit-app-region: no-drag;
+  }
+  .tutorial-slide {
+    display: none;
+    padding: 10px 16px;
+    animation: fadeSlide 0.4s ease;
+  }
+  .tutorial-slide.active { display: block; }
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .tutorial-slide .t-icon {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+  .tutorial-slide .t-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .tutorial-slide .t-body {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+  .tutorial-slide .t-body kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: var(--mono);
+    background: var(--border);
+    color: var(--text);
+    margin: 0 2px;
+  }
+  .tutorial-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 0 10px;
+    -webkit-app-region: no-drag;
+  }
+  .tutorial-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border);
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+  .tutorial-dot.active { background: var(--accent); width: 18px; border-radius: 3px; }
+  .tutorial-dot:hover { background: var(--border-active); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M6 16c0-2 2-6 10-10M16 6c4 4 8 8 10 10M16 6v15M10 20l-4 6M16 21v5M22 20l4 6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="16" cy="13" r="2" fill="currentColor" stroke="none"/>
+    </svg>
+    <span class="mark">Flowith</span>
+  </div>
+  <p class="tagline">Environment Setup</p>
+</div>
+
+<div class="tutorial" id="tutorial">
+  <div class="tutorial-header">
+    <span class="dot"></span> Learning Center
+  </div>
+  <div class="tutorial-slides" id="tutorial-slides">
+    <div class="tutorial-slide active">
+      <div class="t-icon">🧩</div>
+      <div class="t-title">What is Flowith?</div>
+      <div class="t-body">A <b>node-based multi-agent AI workflow manager</b>. Connect task nodes on a canvas to build complex AI pipelines — like a visual programming language for LLMs. Local-first means your data never leaves your machine.</div>
+    </div>
+    <div class="tutorial-slide">
+      <div class="t-icon">🔷</div>
+      <div class="t-title">Node Types</div>
+      <div class="t-body"><b>Input</b> — define data sources · <b>Task</b> — AI processing step · <b>Logic</b> — merge or route · <b>Decision</b> — yes/no branching · <b>Switch</b> — multi-branch routing · <b>Loop</b> — iterate until condition met · <b>Output</b> — display results</div>
+    </div>
+    <div class="tutorial-slide">
+      <div class="t-icon">🎭</div>
+      <div class="t-title">Agents (Roles)</div>
+      <div class="t-body">Create AI personas with custom <b>System Prompts</b>, model selection, and tool permissions. Assign different agents to different task nodes — like a team of specialists. Supports Ollama (local), OpenAI, Anthropic, and Gemini.</div>
+    </div>
+    <div class="tutorial-slide">
+      <div class="t-icon">⚡</div>
+      <div class="t-title">Running Workflows</div>
+      <div class="t-body">Click <b>Run All</b> to execute the entire graph. Nodes run in order based on dependencies (topological sort). <b>Execution caching</b> skips nodes whose inputs haven't changed — saving compute and time.</div>
+    </div>
+    <div class="tutorial-slide">
+      <div class="t-icon">⌨️</div>
+      <div class="t-title">Keyboard Shortcuts</div>
+      <div class="t-body"><kbd>Space</kbd> Run workflow &nbsp; <kbd>Del</kbd> Delete node/edge &nbsp; <kbd>Esc</kbd> Close panel<br><kbd>Ctrl+Z</kbd> Undo &nbsp; <kbd>Ctrl+Shift+Z</kbd> Redo &nbsp; <kbd>Ctrl+S</kbd> Export<br><kbd>Enter</kbd> Confirm in dialogs</div>
+    </div>
+    <div class="tutorial-slide">
+      <div class="t-icon">💡</div>
+      <div class="t-title">Pro Tips</div>
+      <div class="t-body">• Drag nodes from the left toolbar, or <b>right-click</b> the canvas to add.<br>• Connect nodes by dragging from a bottom handle to a top handle.<br>• Use the <b>Task Chat</b> panel to iteratively refine AI outputs.<br>• Switch between <b>Dark / Light</b> themes in Settings.</div>
+    </div>
+  </div>
+  <div class="tutorial-dots" id="tutorial-dots"></div>
+</div>
+
+<div class="syscard" id="sysinfo">
+  <span class="spinner"></span> Detecting system...
+</div>
+
+<div class="deps" id="deps"></div>
+
+<div class="term-box">
+  <div class="term-header">
+    <span class="dot live"></span> Terminal
+  </div>
+  <div class="term-body" id="term"></div>
+</div>
+
+<div class="footer">
+  <div class="all-done" id="alldone">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="3"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    All dependencies ready
+  </div>
+  <div class="actions-footer">
+    <button class="btn-foot" id="btn-skip" onclick="skipAll()">Skip All &amp; Launch</button>
+    <button class="btn-foot primary" id="btn-launch" disabled onclick="launch()">Not ready — install required items</button>
+  </div>
+</div>
+
+<script>
+// ─── State ───
+const DEPS = [
+  { id: "ollama",  name: "Ollama Runtime",  desc: "Local LLM execution engine",        required: true,  action: "install_ollama" },
+  { id: "model",   name: "Default Model",   desc: "llama3.2:3b — auto-matched to demos", required: true,  action: "pull_model",  parent: "ollama" },
+  { id: "python",  name: "Python 3.10+",   desc: "Flowith backend + ComfyUI runtime",  required: true,  action: "install_python" },
+  { id: "git",     name: "Git",            desc: "Version control for ComfyUI setup",  required: true,  action: "install_git" },
+  { id: "comfyui", name: "ComfyUI",        desc: "AI image generation engine (optional)",  required: false, action: "install_comfyui" },
+];
+
+let state = {};
+DEPS.forEach(d => { state[d.id] = "pending"; }); // pending | installing | done | failed
+let installQueue = [];
+let installing = false;
+let skippedDeps = {}; // Track user-skipped deps to ignore late events
+
+// ─── Tutorial Carousel ───
+var tutorialCurrent = 0;
+var tutorialTimer = null;
+var tutorialPaused = false;
+
+function initTutorial() {
+  var slides = document.querySelectorAll("#tutorial-slides .tutorial-slide");
+  var dots = document.getElementById("tutorial-dots");
+  if (!slides.length || !dots) return;
+
+  // Create dots
+  dots.innerHTML = "";
+  for (var i = 0; i < slides.length; i++) {
+    (function (idx) {
+      var dot = document.createElement("div");
+      dot.className = "tutorial-dot" + (idx === 0 ? " active" : "");
+      dot.onclick = function () { goToSlide(idx); };
+      dots.appendChild(dot);
+    })(i);
+  }
+
+  // Pause auto-rotation on hover
+  var tutorialEl = document.getElementById("tutorial");
+  if (tutorialEl) {
+    tutorialEl.onmouseenter = function () { tutorialPaused = true; };
+    tutorialEl.onmouseleave = function () { tutorialPaused = false; };
+  }
+
+  startTutorialRotation();
+}
+
+function goToSlide(idx) {
+  var slides = document.querySelectorAll("#tutorial-slides .tutorial-slide");
+  var dots = document.querySelectorAll("#tutorial-dots .tutorial-dot");
+  if (idx < 0) idx = slides.length - 1;
+  if (idx >= slides.length) idx = 0;
+  for (var i = 0; i < slides.length; i++) {
+    slides[i].classList.toggle("active", i === idx);
+  }
+  for (var j = 0; j < dots.length; j++) {
+    dots[j].classList.toggle("active", j === idx);
+  }
+  tutorialCurrent = idx;
+  resetTutorialTimer();
+}
+
+function startTutorialRotation() {
+  resetTutorialTimer();
+}
+
+function resetTutorialTimer() {
+  if (tutorialTimer) clearInterval(tutorialTimer);
+  tutorialTimer = setInterval(function () {
+    if (!tutorialPaused) goToSlide(tutorialCurrent + 1);
+  }, 8000);
+}
+
+function showTutorial(visible) {
+  var el = document.getElementById("tutorial");
+  if (el) {
+    el.classList.toggle("visible", visible);
+  }
+}
+
+function updateTutorialVisibility() {
+  // Tutorial is always visible during launcher flow
+  showTutorial(true);
+}
+
+// ─── Helpers ───
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+function log(line) {
+  const term = $("#term");
+  const el = document.createElement("div");
+  el.className = "line";
+  el.textContent = line;
+  term.appendChild(el);
+  term.scrollTop = term.scrollHeight;
+}
+
+function setDepStatus(id, status) {
+  // If user skipped this dep, ignore late "done"/"failed" events from backend
+  if (skippedDeps[id] && (status === "done" || status === "failed")) return;
+  state[id] = status;
+  renderDeps();
+  updateLaunchButton();
+  updateTutorialVisibility();
+}
+
+function renderDeps() {
+  const container = $("#deps");
+  container.innerHTML = DEPS.map(d => {
+    const s = state[d.id];
+    const parentDone = !d.parent || state[d.parent] === "done";
+    const hidden = d.parent && state[d.parent] !== "done";
+    let statusText = { pending: "Waiting...", installing: "Installing...", done: "Installed", failed: "Failed", warning: "Not found" }[s];
+    let statusClass = s;
+    let icon = { pending: "○", installing: "○", done: "✓", failed: "✕", warning: "○" }[s];
+    let depClass = s;
+    // Non-required dep handling
+    if (!d.required) {
+      if (s === "pending") { statusText = "Optional"; statusClass = "pending"; icon = "○"; }
+      if (s === "failed") { depClass = "warning"; statusClass = "warning"; statusText = "Not found"; icon = "○"; }
+    }
+    if (s === "done") depClass = "done";
+    if (s === "installing") depClass = "installing";
+
+    let actionsHtml = "";
+    if (s === "failed" && !d.required) {
+      // Non-required: show Locate (to pick folder) + Skip
+      actionsHtml = '<button class="btn primary" onclick="locateDep(\'' + d.id + '\')">Locate folder</button>' +
+        '<button class="btn" onclick="skipDep(\'' + d.id + '\')">Skip</button>';
+    } else if (s === "failed") {
+      actionsHtml = '<button class="btn danger" onclick="retryDep(\'' + d.id + '\')">Retry</button>';
+    } else if (s === "pending" && parentDone && !installing) {
+      if (d.required) {
+        actionsHtml = '<button class="btn primary" onclick="installDep(\'' + d.id + '\')">Install</button>';
+      } else {
+        // Non-required pending: Install + Locate + Skip
+        actionsHtml = '<button class="btn primary" onclick="installDep(\'' + d.id + '\')">Install</button>' +
+          '<button class="btn primary" onclick="locateDep(\'' + d.id + '\')">Locate folder</button>' +
+          '<button class="btn" onclick="skipDep(\'' + d.id + '\')">Skip</button>';
+      }
+    } else if (s === "installing") {
+      actionsHtml = '<button class="btn" onclick="skipDep(\'' + d.id + '\')">Skip</button>';
+    }
+
+    if (hidden) return "";
+    var actionStyle = actionsHtml ? 'display:flex' : 'display:none';
+    return `
+      <div class="dep ${depClass}${d.required ? "" : " optional"}" id="dep-${d.id}">
+        <div class="dep-row">
+          <div class="icon">${s === "installing" ? '<span class="spinner"></span>' : icon}</div>
+          <div class="info">
+            <div class="name">${d.name}${d.required ? "" : "<span class=\"optional-badge\">Optional</span>"}</div>
+            <div class="desc">${d.desc}</div>
+          </div>
+          <span class="status ${statusClass}">${statusText}</span>
+        </div>
+        ${s === "installing" ? '<div class="bar-wrap"><div class="bar-fill" id="bar-' + d.id + '" style="width:0%"></div></div>' : ''}
+        <div class="actions" style="${actionStyle}">${actionsHtml}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function updateLaunchButton() {
+  const allRequiredDone = DEPS.filter(function (d) { return d.required; }).every(function (d) { return state[d.id] === "done"; });
+  const someRequiredInstalling = DEPS.some(function (d) { return d.required && state[d.id] === "installing"; });
+  const btn = $("#btn-launch");
+  const doneDiv = $("#alldone");
+
+  if (allRequiredDone) {
+    doneDiv.style.display = "flex";
+    btn.textContent = "Launch Flowith";
+    btn.disabled = false;
+  } else if (someRequiredInstalling) {
+    doneDiv.style.display = "none";
+    btn.textContent = "Installing dependencies...";
+    btn.disabled = true;
+  } else {
+    doneDiv.style.display = "none";
+    btn.textContent = "Not ready — install required items";
+    btn.disabled = true;
+  }
+}
+
+// ─── Tauri v2 bridge ───
+// Multiple detection strategies because the internal API shape varies across Tauri v2 releases.
+// The canonical API (from @tauri-apps/api/core.js) is: window.__TAURI_INTERNALS__.invoke(cmd, args, options)
+
+let tauri = null;
+let bridgeSource = "none";
+
+function tryDetectTauri() {
+  // Strategy 1: withGlobalTauri enabled — public API
+  if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === "function") {
+    bridgeSource = "__TAURI__ (public)";
+    return {
+      invoke: (cmd, args) => window.__TAURI__.core.invoke(cmd, args || {}),
+      listen: (ev, cb) => window.__TAURI__.event.listen(ev, (e) => cb(e)),
+      closeWindow: () => window.__TAURI__.window.getCurrentWindow().close(),
+    };
+  }
+  // Strategy 2: __TAURI_INTERNALS__ — the default injection
+  var t = window.__TAURI_INTERNALS__;
+  if (t) {
+    // The invoke function can be at t.invoke (stable) or t.core.invoke (some RCs)
+    var invokeFn = null;
+    if (typeof t.invoke === "function") {
+      invokeFn = t.invoke;
+      bridgeSource = "__TAURI_INTERNALS__.invoke";
+    } else if (t.core && typeof t.core.invoke === "function") {
+      invokeFn = t.core.invoke;
+      bridgeSource = "__TAURI_INTERNALS__.core.invoke";
+    }
+
+    // Event listening
+    var eventMod = t.event || (t.core && t.core.event) || t;
+    var listenFn = typeof eventMod.listen === "function" ? eventMod.listen : null;
+
+    // Window management
+    var winMod = t.window || (t.core && t.core.window) || t;
+    var closeFn = (winMod.getCurrentWindow && typeof winMod.getCurrentWindow === "function")
+      ? function () { return winMod.getCurrentWindow().close(); }
+      : null;
+
+    if (invokeFn) {
+      return {
+        invoke: function (cmd, args) { return invokeFn(cmd, args || {}); },
+        listen: listenFn ? function (ev, cb) { return listenFn(ev, function (e) { cb(e); }); } : null,
+        closeWindow: closeFn,
+      };
+    }
+
+    // Strategy 3: invoke exists but shape is unexpected — log what we found
+    bridgeSource = "found __TAURI_INTERNALS__ but could not locate invoke";
+    console.log("[Launcher] __TAURI_INTERNALS__ keys:", Object.keys(t));
+    return null;
+  }
+  bridgeSource = "no Tauri globals";
+  return null;
+}
+
+tauri = tryDetectTauri();
+console.log("[Launcher] Bridge source:", bridgeSource, "| result:", tauri ? "OK" : "NULL");
+
+// Wire up event listeners for real-time terminal + progress from Rust
+if (tauri && tauri.listen) {
+  tauri.listen("launcher-log", function (event) {
+    log(event.payload);
+  });
+  tauri.listen("launcher-progress", function (event) {
+    var p = event.payload;
+    var bar = document.getElementById("bar-" + p.id);
+    if (bar) bar.style.width = p.percent + "%";
+  });
+  tauri.listen("launcher-dep-status", function (event) {
+    var d = event.payload;
+    setDepStatus(d.id, d.status);
+  });
+}
+
+// ─── Invoke with timeout ───
+var INVOKE_TIMEOUT_MS = 30000; // 30s per command
+
+async function invoke(cmd, args) {
+  if (!tauri) {
+    log("⚠ No Tauri bridge (" + bridgeSource + ")");
+    log("  Skipped: " + cmd);
+    return undefined;
+  }
+  try {
+    console.log("[Launcher] invoke:", cmd, args || {});
+    // Race the IPC call against a timeout so the UI never hangs forever
+    var result = await Promise.race([
+      tauri.invoke(cmd, args),
+      new Promise(function (_, reject) {
+        return setTimeout(function () {
+          reject(new Error("IPC timeout after " + (INVOKE_TIMEOUT_MS / 1000) + "s"));
+        }, INVOKE_TIMEOUT_MS);
+      }),
+    ]);
+    console.log("[Launcher] result:", result);
+    return result;
+  } catch (e) {
+    var msg = typeof e === "string" ? e : (e.message || JSON.stringify(e));
+    log("✕ " + cmd + ": " + msg);
+    throw e;
+  }
+}
+
+// ─── Sysinfo display helper ───
+function setSysInfo(html) {
+  var el = document.getElementById("sysinfo");
+  if (el) el.innerHTML = html;
+}
+
+// ─── Actions ───
+async function installDep(id) {
+  if (state[id] === "installing" || state[id] === "done") return;
+  var dep = null;
+  for (var i = 0; i < DEPS.length; i++) { if (DEPS[i].id === id) { dep = DEPS[i]; break; } }
+  if (!dep) return;
+
+  setDepStatus(id, "installing");
+  try {
+    await invoke(dep.action);
+    setDepStatus(id, "done");
+    log("✓ " + dep.name + " installed successfully");
+    autoNext();
+  } catch (e) {
+    setDepStatus(id, "failed");
+    log("✕ " + dep.name + " failed: " + (e.message || e));
+    autoNext();
+  }
+}
+
+function retryDep(id) { installDep(id); }
+
+async function locateDep(id) {
+  if (id === "comfyui") {
+    // Step 1: Open folder picker
+    log("Opening folder picker — select your ComfyUI installation folder...");
+    var selected = null;
+    try {
+      selected = await invoke("plugin:dialog|open", {
+        directory: true, title: "Select ComfyUI installation folder"
+      });
+    } catch (e) {
+      log("✕ Dialog error: " + (e.message || e));
+      return;
+    }
+    if (!selected) {
+      log("Folder selection cancelled.");
+      return;
+    }
+
+    // Debug: log raw dialog return value to understand Tauri v2 format
+    log("> Dialog returned: " + JSON.stringify(selected));
+    var folderPath = null;
+    if (typeof selected === "string") {
+      folderPath = selected;
+    } else if (selected && typeof selected === "object") {
+      folderPath = selected.path || selected.value || selected.dir || "";
+    }
+    if (!folderPath) {
+      log("✕ Could not extract path from dialog result.");
+      log("  Raw value: " + JSON.stringify(selected));
+      return;
+    }
+    log("Selected folder: " + folderPath);
+
+    // Step 2: Validate
+    log("Validating...");
+    try {
+      var result = await invoke("validate_comfyui_path", { path: folderPath });
+      log("> validate_comfyui_path returned: " + JSON.stringify(result));
+      if (result && result.valid) {
+        log("✓ Valid ComfyUI installation found.");
+        setDepStatus(id, "done");
+      } else {
+        log("✕ Selected folder does not contain ComfyUI (main.py not found).");
+        log("  Make sure you select the root ComfyUI folder.");
+      }
+    } catch (e) {
+      log("✕ Validation failed: " + (e.message || e));
+    }
+  }
+}
+
+function skipDep(id) {
+  // Mark as user-skipped so late events from backend don't override
+  skippedDeps[id] = true;
+  state[id] = "failed";
+  log("Skipped " + id + " — continuing to next dependency.");
+  renderDeps();
+  updateLaunchButton();
+  autoNext();
+}
+
+function autoNext() {
+  // Only auto-install required deps. Optional deps need manual Install click.
+  var next = null;
+  for (var i = 0; i < DEPS.length; i++) {
+    var d = DEPS[i];
+    if (d.required && state[d.id] === "pending" && (!d.parent || state[d.parent] === "done")) {
+      next = d; break;
+    }
+  }
+  if (next) installDep(next.id);
+}
+
+function closeLauncherWindow() {
+  if (tauri && tauri.closeWindow) {
+    try { tauri.closeWindow(); } catch (_) {}
+  } else {
+    // Fallback: if we can't close programmatically, just show a message
+    log("Please close this window manually.");
+  }
+}
+
+async function skipAll() {
+  log("Skipping dependency checks — launching Flowith...");
+  // Try to notify backend, but proceed even if IPC is unavailable
+  try { await invoke("finish_launcher", { skipped: true }); } catch (_) {}
+  setTimeout(closeLauncherWindow, 500);
+}
+
+async function launch() {
+  log("All dependencies ready. Launching Flowith...");
+  try { await invoke("finish_launcher", { skipped: false }); } catch (_) {}
+  setTimeout(closeLauncherWindow, 800);
+}
+
+// ─── Init ───
+(async function init() {
+  renderDeps();
+  updateLaunchButton();
+  initTutorial();
+  // Show tutorial immediately while detecting — gives users something to read
+  showTutorial(true);
+
+  // Always enable Skip button — user should never be trapped
+  var btnSkip = document.getElementById("btn-skip");
+  if (btnSkip) btnSkip.disabled = false;
+
+  if (!tauri) {
+    // No Tauri bridge — show diagnostic info and enable manual mode
+    setSysInfo(
+      '<span class="warn">⚠ No Tauri backend (' + bridgeSource + ')</span>' +
+      '<span>·</span>' +
+      '<span>Running in standalone mode</span>'
+    );
+    log("> Bridge: " + bridgeSource);
+    log("> Running standalone — install dependencies via Skip & Launch,");
+    log("  or install them manually and restart the app.");
+    // Mark all deps as skippable in UI — user can launch directly
+    updateLaunchButton();
+  } else {
+    // Bridge found — run system detection with timeout
+    setSysInfo('<span class="spinner"></span> Connecting to backend...');
+    log("> Bridge OK (" + bridgeSource + ")");
+    log("> Detecting system hardware...");
+
+    try {
+      setSysInfo('<span class="spinner"></span> Reading system hardware...');
+      var info = await invoke("detect_system");
+      if (info) {
+        var gpuStatus = info.gpu_ok ? "ok" : "warn";
+        setSysInfo(
+          '<span>' + info.os + '</span>' +
+          '<span>·</span>' +
+          '<span>' + info.cpu + '</span>' +
+          '<span>·</span>' +
+          '<span>' + info.ram + '</span>' +
+          '<span>·</span>' +
+          '<span class="' + gpuStatus + '">GPU: ' + info.gpu + '</span>' +
+          '<span>·</span>' +
+          '<span>Disk: ' + info.disk_free + '</span>'
+        );
+        log("> System: " + info.os + " · " + info.cpu + " · " + info.ram);
+        log("> GPU: " + info.gpu + (info.gpu_ok ? " ✓" : " ⚠"));
+        log("> Disk: " + info.disk_free + " available");
+      }
+    } catch (e) {
+      setSysInfo('<span class="warn">⚠ System detection failed</span>' +
+        '<span>·</span>' +
+        '<span>' + (e.message || "Unknown error") + '</span>');
+      log("> System detection failed: " + (e.message || e));
+      log("> Dependencies can still be installed manually.");
+      log("> Use Skip & Launch to proceed without auto-detection.");
+    }
+  }
+
+  // Auto-start installation (only if bridge is available)
+  if (tauri) {
+    setTimeout(function () {
+      var first = null;
+      for (var i = 0; i < DEPS.length; i++) {
+        var d = DEPS[i];
+        if (state[d.id] === "pending" && (!d.parent || state[d.parent] === "done")) {
+          first = d; break;
+        }
+      }
+      if (first) installDep(first.id);
+    }, 800);
+  }
+})();
+</script>
+</body>
+</html>

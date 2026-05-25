@@ -1,0 +1,12 @@
+{
+  "identifier": "dialog",
+  "description": "Allow opening file/folder dialogs",
+  "windows": ["main", "launcher"],
+  "permissions": [
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "core:default"
+  ]
+}

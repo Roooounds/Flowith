@@ -1,0 +1,13 @@
+{
+  "identifier": "sql",
+  "description": "Allow SQLite database access",
+  "windows": ["main", "launcher"],
+  "permissions": [
+    "sql:default",
+    "sql:allow-load",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-close",
+    "core:default"
+  ]
+}
