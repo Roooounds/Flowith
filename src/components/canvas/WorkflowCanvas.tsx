@@ -48,13 +48,16 @@ export default function WorkflowCanvas() {
   const removeEdge = useProjectStore((s) => s.removeEdge);
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);
+  const copyNodes = useProjectStore((s) => s.copySelectedNodes);
+  const cutNodes = useProjectStore((s) => s.cutSelectedNodes);
+  const pasteNodes = useProjectStore((s) => s.pasteNodes);
+  const selectAllNodes = useProjectStore((s) => s.selectAllNodes);
 
   // ── Keyboard shortcuts ──────────────────────────────────────────
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      // Don't intercept when focus is in a text input
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
@@ -64,11 +67,23 @@ export default function WorkflowCanvas() {
       } else if (mod && e.key === "z" && e.shiftKey) {
         e.preventDefault();
         redo();
+      } else if (mod && e.key === "c" && !e.shiftKey) {
+        e.preventDefault();
+        copyNodes();
+      } else if (mod && e.key === "x" && !e.shiftKey) {
+        e.preventDefault();
+        cutNodes();
+      } else if (mod && e.key === "v" && !e.shiftKey) {
+        e.preventDefault();
+        pasteNodes();
+      } else if (mod && e.key === "a" && !e.shiftKey) {
+        e.preventDefault();
+        selectAllNodes();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [undo, redo]);
+  }, [undo, redo, copyNodes, cutNodes, pasteNodes, selectAllNodes]);
 
   // Full position sync when layout changes
   useEffect(() => {
@@ -353,7 +368,8 @@ export default function WorkflowCanvas() {
       edgesFocusable={true}
       edgesReconnectable={true}
       selectionOnDrag={true}
-      panOnDrag={[1]}
+      panOnDrag={[1, 2]}
+      selectNodesOnDrag={false}
       fitView
       className="bg-boss-bg"
       proOptions={{ hideAttribution: true }}

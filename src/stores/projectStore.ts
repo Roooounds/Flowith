@@ -107,6 +107,16 @@ interface ProjectStore {
   setRightPanel: (panel: RightPanel) => void;
   autoLayout: () => void;
   syncCanvasToWorkflow: (nodes: BossNode[], edges: BossEdge[]) => void;
+
+  // Clipboard (cross-project, persisted to localStorage)
+  clipboard: { nodes: TaskNode[]; edges: WorkflowEdge[] } | null;
+  copySelectedNodes: () => void;
+  cutSelectedNodes: () => void;
+  pasteNodes: (position?: { x: number; y: number }) => void;
+  selectAllNodes: () => void;
+
+  // Export
+  exportSelectedAsWorkflow: () => Project | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -627,6 +637,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   editingAgentId: null,
   past: [],
   future: [],
+
+  // Clipboard — persisted to localStorage for cross-project use
+  clipboard: (() => {
+    try {
+      const raw = localStorage.getItem("flowith_clipboard");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })(),
 
   // ── Project CRUD ──────────────────────────────────────────────
 
@@ -1274,6 +1292,134 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const wEdges: WorkflowEdge[] = edges.map((e) => ({ edgeId: e.id, sourceNodeId: e.source, targetNodeId: e.target, label: typeof e.label === "string" ? e.label : undefined }));
     const updatedProj = updateProjectInState(projects, activeProjectId, (p) => ({ ...p, workflow: { ...p.workflow, edges: wEdges } }));
     set({ projects: updatedProj, canvasNodes: nodes, canvasEdges: edges, project: { ...project, workflow: { ...project.workflow, edges: wEdges }, updatedAt: new Date().toISOString() } });
+  },
+
+  // ── Clipboard ─────────────────────────────────────────────────
+
+  copySelectedNodes: () => {
+    const { project, selectedNodeId, canvasNodes } = get();
+    if (!project) return;
+    // Collect selected nodes (via box-select, need React Flow's selected state)
+    // We track selectedNodeId for single clicks; for multi-select we scan canvasNodes
+    const selectedIds = new Set<string>();
+    if (selectedNodeId) selectedIds.add(selectedNodeId);
+    // Also check canvasNodes for RF selection state
+    for (const cn of canvasNodes) {
+      if ((cn as any).selected) selectedIds.add(cn.id);
+    }
+    if (selectedIds.size === 0) return;
+    const workflowNodes = project.workflow.nodes.filter((n) => selectedIds.has(n.nodeId));
+    if (workflowNodes.length === 0) return;
+    const workflowEdges = project.workflow.edges.filter(
+      (e) => selectedIds.has(e.sourceNodeId) && selectedIds.has(e.targetNodeId)
+    );
+    const data = { nodes: workflowNodes.map((n) => ({ ...n })), edges: workflowEdges.map((e) => ({ ...e })) };
+    localStorage.setItem("flowith_clipboard", JSON.stringify(data));
+    set({ clipboard: data });
+  },
+
+  cutSelectedNodes: () => {
+    const { project, projects, activeProjectId } = get();
+    if (!project) return;
+    get().copySelectedNodes();
+    const { clipboard, canvasNodes } = get();
+    if (!clipboard || clipboard.nodes.length === 0) return;
+    const cutIds = new Set(clipboard.nodes.map((n) => n.nodeId));
+    const newNodes = project.workflow.nodes.filter((n) => !cutIds.has(n.nodeId));
+    const newEdges = project.workflow.edges.filter(
+      (e) => !cutIds.has(e.sourceNodeId) && !cutIds.has(e.targetNodeId)
+    );
+    pushHistory(set, get);
+    const updatedProj = updateProjectInState(projects, activeProjectId!, (p) => ({
+      ...p, workflow: { nodes: newNodes, edges: newEdges },
+    }));
+    const canvas = buildCanvasFromProject({ ...project, workflow: { nodes: newNodes, edges: newEdges } });
+    set({
+      projects: updatedProj,
+      project: { ...project, workflow: { nodes: newNodes, edges: newEdges }, updatedAt: new Date().toISOString() },
+      canvasNodes: canvas.canvasNodes,
+      canvasEdges: canvas.canvasEdges,
+      selectedNodeId: null,
+    });
+  },
+
+  pasteNodes: (position) => {
+    const { project, projects, activeProjectId, clipboard } = get();
+    if (!project || !clipboard || clipboard.nodes.length === 0) return;
+    const idMap = new Map<string, string>();
+    const newNodes: TaskNode[] = [];
+    const offsetX = position ? position.x - Math.min(...clipboard.nodes.map((n) => n.position.x)) : 50;
+    const offsetY = position ? position.y - Math.min(...clipboard.nodes.map((n) => n.position.y)) : 50;
+    for (const n of clipboard.nodes) {
+      const newId = uuidv4();
+      idMap.set(n.nodeId, newId);
+      newNodes.push({
+        ...n,
+        nodeId: newId,
+        position: { x: n.position.x + offsetX, y: n.position.y + offsetY },
+        status: "pending" as const,
+        outputCache: null,
+        executionHash: null,
+      });
+    }
+    const newEdges = clipboard.edges.map((e) => ({
+      ...e,
+      edgeId: uuidv4(),
+      sourceNodeId: idMap.get(e.sourceNodeId) ?? e.sourceNodeId,
+      targetNodeId: idMap.get(e.targetNodeId) ?? e.targetNodeId,
+    }));
+    pushHistory(set, get);
+    const mergedNodes = [...project.workflow.nodes, ...newNodes];
+    const mergedEdges = [...project.workflow.edges, ...newEdges];
+    const updatedProj = updateProjectInState(projects, activeProjectId!, (p) => ({
+      ...p, workflow: { nodes: mergedNodes, edges: mergedEdges },
+    }));
+    const canvas = buildCanvasFromProject({ ...project, workflow: { nodes: mergedNodes, edges: mergedEdges } });
+    // Select pasted nodes
+    const pastedIds = newNodes.map((n) => n.nodeId);
+    set({
+      projects: updatedProj,
+      project: { ...project, workflow: { nodes: mergedNodes, edges: mergedEdges }, updatedAt: new Date().toISOString() },
+      canvasNodes: canvas.canvasNodes,
+      canvasEdges: canvas.canvasEdges,
+      selectedNodeId: pastedIds.length === 1 ? pastedIds[0] : null,
+    });
+  },
+
+  selectAllNodes: () => {
+    const { canvasNodes } = get();
+    // Set all nodes as selected via React Flow's internal state
+    // We do this by setting the "selected" property on each node
+    const updated = canvasNodes.map((n) => ({ ...n, selected: true } as BossNode));
+    set({ canvasNodes: updated });
+  },
+
+  // ── Export ────────────────────────────────────────────────────
+
+  exportSelectedAsWorkflow: () => {
+    const { project, canvasNodes } = get();
+    if (!project) return null;
+    const selectedIds = new Set(canvasNodes.filter((n) => (n as any).selected).map((n) => n.id));
+    if (selectedIds.size === 0) return null;
+    const nodes = project.workflow.nodes.filter((n) => selectedIds.has(n.nodeId));
+    const edges = project.workflow.edges.filter(
+      (e) => selectedIds.has(e.sourceNodeId) && selectedIds.has(e.targetNodeId)
+    );
+    if (nodes.length === 0) return null;
+    const exp: Project = {
+      projectId: uuidv4(),
+      name: project.name + " (export)",
+      description: "",
+      goal: "",
+      knowledgeBaseId: null,
+      workflow: { nodes: nodes.map((n) => ({ ...n })), edges: edges.map((e) => ({ ...e })) },
+      agents: project.agents.filter((a) => nodes.some((n) => n.agentIds.includes(a.agentId))),
+      vaultAgents: [],
+      permanentlyDeletedPresetNames: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    return exp;
   },
 }));
 
