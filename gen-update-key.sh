@@ -12,6 +12,12 @@ KEY_FILE="$HOME/.flowith/update.key"
 
 mkdir -p "$HOME/.flowith"
 
+echo "→ Checking Tauri CLI..."
+if ! cargo tauri --version &>/dev/null; then
+  echo "  Installing tauri-cli..."
+  cargo install tauri-cli
+fi
+
 echo "→ Generating ed25519 signing key..."
 cargo tauri signer generate -w "$KEY_FILE" -p ""
 
