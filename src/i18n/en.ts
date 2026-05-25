@@ -8,6 +8,11 @@ const en = {
     import: "Import",
     export: "Export",
     settingsTooltip: "Settings",
+    updateAvailable: (v: string) => `Flowith ${v} is available — you're on 1.0.0`,
+    updateNow: "Update",
+    downloadingUpdate: "Downloading update...",
+    downloading: "Downloading",
+    dismiss: "Dismiss",
   },
   welcome: {
     heading: "Welcome to Flowith",

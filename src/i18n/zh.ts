@@ -10,6 +10,11 @@ const zh: Translations = {
     import: "导入",
     export: "导出",
     settingsTooltip: "设置",
+    updateAvailable: (v: string) => `Flowith ${v} 已发布 — 当前版本 1.0.0`,
+    updateNow: "立即更新",
+    downloadingUpdate: "正在下载更新...",
+    downloading: "下载中",
+    dismiss: "忽略",
   },
   welcome: {
     heading: "欢迎使用 Flowith",

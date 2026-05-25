@@ -40,7 +40,17 @@
       "csp": null
     }
   },
-  "plugins": {},
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Roooounds/Flowith/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PLACEHOLDER_RUN_KEYGEN",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

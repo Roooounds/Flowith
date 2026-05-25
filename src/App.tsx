@@ -13,6 +13,7 @@ import GoalBar from "./components/common/GoalBar";
 import { useProjectStore } from "./stores/projectStore";
 import { applyAppTheme } from "./services/appConfig";
 import { useT } from "./i18n";
+import { check } from "@tauri-apps/plugin-updater";
 
 function ProgressBar() {
   const isRunning = useProjectStore((s) => s.isRunning);
@@ -82,7 +83,40 @@ export default function App() {
   const editingAgent = useProjectStore((s) => s.project?.agents.find((a) => a.agentId === editingAgentId) ?? null);
   const t = useT();
 
+  const [updateBanner, setUpdateBanner] = useState<{ version: string; downloading: boolean } | null>(null);
+
   useEffect(() => { applyAppTheme(); }, []);
+
+  // ── Update check ──────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    const doCheck = async () => {
+      try {
+        const update = await check();
+        if (cancelled || !update) return;
+        setUpdateBanner({ version: update.version, downloading: false });
+      } catch {
+        // Silently ignore — updater not configured or no network
+      }
+    };
+    // Delay to let the UI settle
+    const t = setTimeout(doCheck, 3000);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, []);
+
+  const handleUpdate = async () => {
+    if (!updateBanner || updateBanner.downloading) return;
+    setUpdateBanner((s) => s ? { ...s, downloading: true } : null);
+    try {
+      const update = await check();
+      if (update) {
+        await update.downloadAndInstall();
+        // The app will restart after install
+      }
+    } catch {
+      setUpdateBanner(null);
+    }
+  };
 
   return (
     <div className="h-full w-full flex flex-col">
@@ -92,6 +126,34 @@ export default function App() {
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {editingAgent && (
         <RoleEditorModal agent={editingAgent} onClose={() => setEditingAgentId(null)} />
+      )}
+
+      {/* Update banner */}
+      {updateBanner && (
+        <div className="bg-boss-accent/10 border-b border-boss-accent/30 px-4 py-2 flex items-center justify-between">
+          <span className="text-sm text-boss-accent">
+            {updateBanner.downloading
+              ? t.app.downloadingUpdate
+              : t.app.updateAvailable(updateBanner.version)}
+          </span>
+          <div className="flex items-center gap-2">
+            {!updateBanner.downloading && (
+              <>
+                <button onClick={handleUpdate}
+                  className="px-3 py-1 text-xs font-medium rounded bg-boss-accent text-white hover:bg-boss-accent-hover transition-colors">
+                  {t.app.updateNow}
+                </button>
+                <button onClick={() => setUpdateBanner(null)}
+                  className="px-3 py-1 text-xs rounded text-boss-text-muted hover:text-boss-text transition-colors">
+                  {t.app.dismiss}
+                </button>
+              </>
+            )}
+            {updateBanner.downloading && (
+              <span className="text-xs text-boss-text-muted animate-pulse">{t.app.downloading}...</span>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Top header */}
