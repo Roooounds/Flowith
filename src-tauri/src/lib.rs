@@ -635,6 +635,13 @@ fn install_git(app: AppHandle) -> Result<(), String> {
         dep_status(&app, "git", "done");
         Ok(())
     }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Package managers vary by distro; let the user handle it.
+        dep_status(&app, "git", "failed");
+        Err("Git not found. Install via your package manager:\n  sudo apt install git\n  sudo dnf install git\n  sudo pacman -S git".into())
+    }
 }
 
 #[tauri::command]
