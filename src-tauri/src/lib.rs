@@ -231,7 +231,7 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
                 "KSampler" | "KSamplerAdvanced" => {
                     inputs.insert(
                         "seed".into(),
-                        wv.get(0).cloned().unwrap_or(serde_json::json!(0)),
+                        wv.first().cloned().unwrap_or(serde_json::json!(0)),
                     );
                     inputs.insert(
                         "steps".into(),
@@ -260,7 +260,7 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
                 "EmptyLatentImage" => {
                     inputs.insert(
                         "width".into(),
-                        wv.get(0).cloned().unwrap_or(serde_json::json!(512)),
+                        wv.first().cloned().unwrap_or(serde_json::json!(512)),
                     );
                     inputs.insert(
                         "height".into(),
@@ -274,7 +274,7 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
                 "SaveImage" | "PreviewImage" => {
                     inputs.insert(
                         "filename_prefix".into(),
-                        wv.get(0).cloned().unwrap_or(serde_json::json!("Flowith")),
+                        wv.first().cloned().unwrap_or(serde_json::json!("Flowith")),
                     );
                 }
                 _ => {}
@@ -363,7 +363,7 @@ fn inject_prompt_into_workflow(
         };
         if ct == "KSampler" || ct == "KSamplerAdvanced" {
             if let Some(pos_link) = node.pointer("/inputs/positive").and_then(|v| v.as_array()) {
-                if let Some(src_id) = pos_link.get(0).and_then(|v| v.as_u64()) {
+                if let Some(src_id) = pos_link.first().and_then(|v| v.as_u64()) {
                     positive_node_key = Some(src_id.to_string());
                     break;
                 }
@@ -393,6 +393,7 @@ fn inject_prompt_into_workflow(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn comfyui_generate(
     base_url: String,
     model: String,
@@ -595,6 +596,7 @@ fn log(app: &AppHandle, msg: &str) {
     let _ = app.emit("launcher-log", msg);
 }
 
+#[allow(dead_code)]
 fn progress(app: &AppHandle, id: &str, pct: u64) {
     let _ = app.emit(
         "launcher-progress",
@@ -610,6 +612,7 @@ fn dep_status(app: &AppHandle, id: &str, status: &str) {
 }
 
 /// Download a file with progress events, write to dest.
+#[allow(dead_code)]
 fn download(app: &AppHandle, id: &str, url: &str, dest: &Path) -> Result<(), String> {
     log(app, &format!("Downloading {}...", url));
     let resp = ureq::get(url)
@@ -633,8 +636,8 @@ fn download(app: &AppHandle, id: &str, url: &str, dest: &Path) -> Result<(), Str
         file.write_all(&buf[..n])
             .map_err(|e| format!("Write error: {}", e))?;
         downloaded += n as u64;
-        if total > 0 {
-            progress(app, id, downloaded * 100 / total);
+        if let Some(pct) = (downloaded * 100).checked_div(total) {
+            progress(app, id, pct);
         }
     }
     log(app, "Download complete.");
