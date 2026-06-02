@@ -1,3 +1,4 @@
+use base64::Engine;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -5,7 +6,6 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use base64::Engine;
 use tauri::{AppHandle, Emitter, Manager};
 
 mod kb;
@@ -18,17 +18,33 @@ fn get_app_status() -> String {
     serde_json::to_string(&serde_json::json!({
         "status": "running",
         "version": env!("CARGO_PKG_VERSION"),
-    })).unwrap_or_default()
+    }))
+    .unwrap_or_default()
 }
 
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    { Command::new("open").arg(&path).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     #[cfg(target_os = "windows")]
-    { Command::new("explorer").arg(&path).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     #[cfg(target_os = "linux")]
-    { Command::new("xdg-open").arg(&path).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     Ok(())
 }
 
@@ -63,16 +79,39 @@ fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    { Command::new("open").arg(&path).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     #[cfg(target_os = "windows")]
-    { Command::new("cmd").args(["/c", "start", "", &path]).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("cmd")
+            .args(["/c", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     #[cfg(target_os = "linux")]
-    { Command::new("xdg-open").arg(&path).spawn().map_err(|e| format!("Failed: {}", e))?; }
+    {
+        Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed: {}", e))?;
+    }
     Ok(())
 }
 
 #[tauri::command]
-fn cloud_llm_call(provider: String, api_key: String, model: String, system_prompt: String, prompt: String, temperature: f64, endpoint: String) -> Result<String, String> {
+fn cloud_llm_call(
+    provider: String,
+    api_key: String,
+    model: String,
+    system_prompt: String,
+    prompt: String,
+    temperature: f64,
+    endpoint: String,
+) -> Result<String, String> {
     match provider.as_str() {
         "openai" => {
             let body = serde_json::json!({
@@ -89,7 +128,8 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
                 .send_json(body)
                 .map_err(|e| format!("OpenAI error: {}", e))?;
             let data: serde_json::Value = resp.into_json().map_err(|e| format!("Parse: {}", e))?;
-            data["choices"][0]["message"]["content"].as_str()
+            data["choices"][0]["message"]["content"]
+                .as_str()
                 .map(|s| s.to_string())
                 .ok_or_else(|| format!("Unexpected response: {}", data))
         }
@@ -108,7 +148,8 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
                 .send_json(body)
                 .map_err(|e| format!("Anthropic error: {}", e))?;
             let data: serde_json::Value = resp.into_json().map_err(|e| format!("Parse: {}", e))?;
-            data["content"][0]["text"].as_str()
+            data["content"][0]["text"]
+                .as_str()
                 .map(|s| s.to_string())
                 .ok_or_else(|| format!("Unexpected response: {}", data))
         }
@@ -120,18 +161,26 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
             if !system_prompt.is_empty() {
                 body["systemInstruction"] = serde_json::json!({"parts": [{"text": system_prompt}]});
             }
-            let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, api_key);
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, api_key
+            );
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")
                 .send_json(body)
                 .map_err(|e| format!("Gemini error: {}", e))?;
             let data: serde_json::Value = resp.into_json().map_err(|e| format!("Parse: {}", e))?;
-            data["candidates"][0]["content"]["parts"][0]["text"].as_str()
+            data["candidates"][0]["content"]["parts"][0]["text"]
+                .as_str()
                 .map(|s| s.to_string())
                 .ok_or_else(|| format!("Unexpected response: {}", data))
         }
         "custom" => {
-            let base = if endpoint.is_empty() { "https://api.deepseek.com".to_string() } else { endpoint };
+            let base = if endpoint.is_empty() {
+                "https://api.deepseek.com".to_string()
+            } else {
+                endpoint
+            };
             let body = serde_json::json!({
                 "model": model,
                 "messages": [
@@ -147,7 +196,8 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
                 .send_json(body)
                 .map_err(|e| format!("Custom API error: {}", e))?;
             let data: serde_json::Value = resp.into_json().map_err(|e| format!("Parse: {}", e))?;
-            data["choices"][0]["message"]["content"].as_str()
+            data["choices"][0]["message"]["content"]
+                .as_str()
                 .map(|s| s.to_string())
                 .ok_or_else(|| format!("Unexpected response: {}", data))
         }
@@ -159,7 +209,8 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
 fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde_json::Value> {
     let nodes_arr = raw.get("nodes")?.as_array()?;
     let links_arr = raw.get("links").and_then(|v| v.as_array());
-    let mut link_map: std::collections::HashMap<u64, (String, usize)> = std::collections::HashMap::new();
+    let mut link_map: std::collections::HashMap<u64, (String, usize)> =
+        std::collections::HashMap::new();
     if let Some(links) = links_arr {
         for link in links {
             let arr = link.as_array()?;
@@ -178,23 +229,53 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
         if let Some(wv) = widgets_values {
             match class_type {
                 "KSampler" | "KSamplerAdvanced" => {
-                    inputs.insert("seed".into(), wv.get(0).cloned().unwrap_or(serde_json::json!(0)));
-                    inputs.insert("steps".into(), wv.get(1).cloned().unwrap_or(serde_json::json!(20)));
-                    inputs.insert("cfg".into(), wv.get(2).cloned().unwrap_or(serde_json::json!(7.0)));
-                    inputs.insert("sampler_name".into(), wv.get(3).cloned().unwrap_or(serde_json::json!("euler")));
-                    inputs.insert("scheduler".into(), wv.get(4).cloned().unwrap_or(serde_json::json!("normal")));
-                    inputs.insert("denoise".into(), wv.get(5).cloned().unwrap_or(serde_json::json!(1.0)));
+                    inputs.insert(
+                        "seed".into(),
+                        wv.get(0).cloned().unwrap_or(serde_json::json!(0)),
+                    );
+                    inputs.insert(
+                        "steps".into(),
+                        wv.get(1).cloned().unwrap_or(serde_json::json!(20)),
+                    );
+                    inputs.insert(
+                        "cfg".into(),
+                        wv.get(2).cloned().unwrap_or(serde_json::json!(7.0)),
+                    );
+                    inputs.insert(
+                        "sampler_name".into(),
+                        wv.get(3).cloned().unwrap_or(serde_json::json!("euler")),
+                    );
+                    inputs.insert(
+                        "scheduler".into(),
+                        wv.get(4).cloned().unwrap_or(serde_json::json!("normal")),
+                    );
+                    inputs.insert(
+                        "denoise".into(),
+                        wv.get(5).cloned().unwrap_or(serde_json::json!(1.0)),
+                    );
                 }
                 "CheckpointLoaderSimple" => {
                     inputs.insert("ckpt_name".into(), serde_json::json!(model));
                 }
                 "EmptyLatentImage" => {
-                    inputs.insert("width".into(), wv.get(0).cloned().unwrap_or(serde_json::json!(512)));
-                    inputs.insert("height".into(), wv.get(1).cloned().unwrap_or(serde_json::json!(512)));
-                    inputs.insert("batch_size".into(), wv.get(2).cloned().unwrap_or(serde_json::json!(1)));
+                    inputs.insert(
+                        "width".into(),
+                        wv.get(0).cloned().unwrap_or(serde_json::json!(512)),
+                    );
+                    inputs.insert(
+                        "height".into(),
+                        wv.get(1).cloned().unwrap_or(serde_json::json!(512)),
+                    );
+                    inputs.insert(
+                        "batch_size".into(),
+                        wv.get(2).cloned().unwrap_or(serde_json::json!(1)),
+                    );
                 }
                 "SaveImage" | "PreviewImage" => {
-                    inputs.insert("filename_prefix".into(), wv.get(0).cloned().unwrap_or(serde_json::json!("Flowith")));
+                    inputs.insert(
+                        "filename_prefix".into(),
+                        wv.get(0).cloned().unwrap_or(serde_json::json!("Flowith")),
+                    );
                 }
                 _ => {}
             }
@@ -212,10 +293,13 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
                 }
             }
         }
-        api.insert(id.to_string(), serde_json::json!({
-            "class_type": class_type,
-            "inputs": inputs,
-        }));
+        api.insert(
+            id.to_string(),
+            serde_json::json!({
+                "class_type": class_type,
+                "inputs": inputs,
+            }),
+        );
     }
     Some(serde_json::Value::Object(api))
 }
@@ -225,21 +309,36 @@ fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde
 /// 1. Replace {{prompt}} / {{input}} markers in CLIPTextEncode text fields
 /// 2. Replace {{negative_prompt}} markers
 /// 3. If no markers found, auto-inject into the positive CLIPTextEncode (traced via KSampler)
-fn inject_prompt_into_workflow(workflow: &mut serde_json::Value, prompt: &str, negative_prompt: Option<&str>) {
-    let obj = match workflow.as_object_mut() { Some(o) => o, None => return };
+fn inject_prompt_into_workflow(
+    workflow: &mut serde_json::Value,
+    prompt: &str,
+    negative_prompt: Option<&str>,
+) {
+    let obj = match workflow.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
     let neg = negative_prompt.unwrap_or("");
     let mut found_marker = false;
 
     // Pass 1: Replace {{prompt}} / {{input}} / {{negative_prompt}} markers
     for (_key, node) in obj.iter_mut() {
-        if node.get("class_type").and_then(|v| v.as_str()) != Some("CLIPTextEncode") { continue; }
-        let text_val = match node.pointer("/inputs/text").and_then(|v| v.as_str()).map(|s| s.to_owned()) {
+        if node.get("class_type").and_then(|v| v.as_str()) != Some("CLIPTextEncode") {
+            continue;
+        }
+        let text_val = match node
+            .pointer("/inputs/text")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned())
+        {
             Some(t) => t,
             None => continue,
         };
         if text_val.contains("{{prompt}}") || text_val.contains("{{input}}") {
             found_marker = true;
-            let replaced = text_val.replace("{{prompt}}", prompt).replace("{{input}}", prompt);
+            let replaced = text_val
+                .replace("{{prompt}}", prompt)
+                .replace("{{input}}", prompt);
             if let Some(inputs) = node.get_mut("inputs").and_then(|v| v.as_object_mut()) {
                 inputs.insert("text".into(), serde_json::json!(replaced));
             }
@@ -251,12 +350,17 @@ fn inject_prompt_into_workflow(workflow: &mut serde_json::Value, prompt: &str, n
             }
         }
     }
-    if found_marker { return; }
+    if found_marker {
+        return;
+    }
 
     // Pass 2: No markers — auto-inject into the positive CLIPTextEncode
     let mut positive_node_key: Option<String> = None;
     for (_key, node) in obj.iter() {
-        let ct = match node.get("class_type").and_then(|v| v.as_str()) { Some(c) => c, None => continue };
+        let ct = match node.get("class_type").and_then(|v| v.as_str()) {
+            Some(c) => c,
+            None => continue,
+        };
         if ct == "KSampler" || ct == "KSamplerAdvanced" {
             if let Some(pos_link) = node.pointer("/inputs/positive").and_then(|v| v.as_array()) {
                 if let Some(src_id) = pos_link.get(0).and_then(|v| v.as_u64()) {
@@ -271,7 +375,9 @@ fn inject_prompt_into_workflow(workflow: &mut serde_json::Value, prompt: &str, n
         let mut keys: Vec<(u64, String)> = Vec::new();
         for (key, node) in obj.iter() {
             if node.get("class_type").and_then(|v| v.as_str()) == Some("CLIPTextEncode") {
-                if let Ok(num) = key.parse::<u64>() { keys.push((num, key.clone())); }
+                if let Ok(num) = key.parse::<u64>() {
+                    keys.push((num, key.clone()));
+                }
             }
         }
         keys.sort_by_key(|k| k.0);
@@ -288,16 +394,22 @@ fn inject_prompt_into_workflow(workflow: &mut serde_json::Value, prompt: &str, n
 
 #[tauri::command]
 fn comfyui_generate(
-    base_url: String, model: String, prompt: String,
-    width: Option<u32>, height: Option<u32>, steps: Option<u32>,
-    cfg_scale: Option<f64>, seed: Option<u64>, negative_prompt: Option<String>,
+    base_url: String,
+    model: String,
+    prompt: String,
+    width: Option<u32>,
+    height: Option<u32>,
+    steps: Option<u32>,
+    cfg_scale: Option<f64>,
+    seed: Option<u64>,
+    negative_prompt: Option<String>,
     workflow_json: Option<String>,
 ) -> Result<String, String> {
     let url = base_url.trim_end_matches('/');
 
     let workflow = if let Some(ref json_str) = workflow_json {
-        let raw: serde_json::Value = serde_json::from_str(json_str)
-            .map_err(|e| format!("Invalid workflow JSON: {}", e))?;
+        let raw: serde_json::Value =
+            serde_json::from_str(json_str).map_err(|e| format!("Invalid workflow JSON: {}", e))?;
         if raw.get("nodes").and_then(|v| v.as_array()).is_some() {
             convert_editor_workflow(&raw, &model)
                 .ok_or("Failed to convert editor workflow to API format")?
@@ -310,7 +422,9 @@ fn comfyui_generate(
         let s = steps.unwrap_or(20);
         let c = cfg_scale.unwrap_or(7.0);
         let sd = seed.unwrap_or(rand::random::<u64>() % 1_000_000_000);
-        let np = negative_prompt.clone().unwrap_or_else(|| "bad quality, blurry, distorted".to_string());
+        let np = negative_prompt
+            .clone()
+            .unwrap_or_else(|| "bad quality, blurry, distorted".to_string());
         serde_json::json!({
             "1": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
             "2": { "class_type": "EmptyLatentImage", "inputs": { "width": w, "height": h, "batch_size": 1 } },
@@ -329,12 +443,15 @@ fn comfyui_generate(
     }
 
     // Dynamically find all SaveImage / PreviewImage node IDs in the workflow
-    let save_node_ids: Vec<String> = workflow.as_object()
+    let save_node_ids: Vec<String> = workflow
+        .as_object()
         .map(|obj| {
             obj.iter()
                 .filter(|(_, node)| {
-                    matches!(node.get("class_type").and_then(|v| v.as_str()),
-                        Some("SaveImage") | Some("PreviewImage"))
+                    matches!(
+                        node.get("class_type").and_then(|v| v.as_str()),
+                        Some("SaveImage") | Some("PreviewImage")
+                    )
                 })
                 .map(|(k, _)| k.clone())
                 .collect()
@@ -352,47 +469,79 @@ fn comfyui_generate(
         return Err(format!("ComfyUI error {}: {}", status, body));
     }
 
-    let result: serde_json::Value = resp.into_json().map_err(|e| format!("Parse error: {}", e))?;
-    let prompt_id = result["prompt_id"].as_str().ok_or("No prompt_id in response")?.to_string();
+    let result: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Parse error: {}", e))?;
+    let prompt_id = result["prompt_id"]
+        .as_str()
+        .ok_or("No prompt_id in response")?
+        .to_string();
 
     loop {
         thread::sleep(Duration::from_secs(1));
         let hist_url = format!("{}/history/{}", url, prompt_id);
-        let hist = ureq::get(&hist_url).call().map_err(|e| format!("History fetch error: {}", e))?;
-        if hist.status() != 200 { continue; }
+        let hist = ureq::get(&hist_url)
+            .call()
+            .map_err(|e| format!("History fetch error: {}", e))?;
+        if hist.status() != 200 {
+            continue;
+        }
         let data: serde_json::Value = hist.into_json().map_err(|_| "Invalid history JSON")?;
         let outputs = &data[&prompt_id]["outputs"];
 
         let mut found_img: Option<&serde_json::Value> = None;
         for nid in &save_node_ids {
             if let Some(imgs) = outputs[nid]["images"].as_array() {
-                if !imgs.is_empty() { found_img = Some(&imgs[0]); break; }
+                if !imgs.is_empty() {
+                    found_img = Some(&imgs[0]);
+                    break;
+                }
             }
         }
         if found_img.is_none() {
             if let Some(obj) = outputs.as_object() {
                 for (_nid, node_out) in obj {
                     if let Some(imgs) = node_out["images"].as_array() {
-                        if !imgs.is_empty() { found_img = Some(&imgs[0]); break; }
+                        if !imgs.is_empty() {
+                            found_img = Some(&imgs[0]);
+                            break;
+                        }
                     }
                 }
             }
         }
-        let img = match found_img { Some(i) => i, None => continue };
+        let img = match found_img {
+            Some(i) => i,
+            None => continue,
+        };
         let filename = img["filename"].as_str().unwrap_or("");
         let subfolder = img["subfolder"].as_str().unwrap_or("");
-        let img_url = format!("{}/view?filename={}&subfolder={}&type=output", url, filename, subfolder);
+        let img_url = format!(
+            "{}/view?filename={}&subfolder={}&type=output",
+            url, filename, subfolder
+        );
 
-        let img_resp = ureq::get(&img_url).call().map_err(|e| format!("Image download error: {}", e))?;
+        let img_resp = ureq::get(&img_url)
+            .call()
+            .map_err(|e| format!("Image download error: {}", e))?;
         let mut bytes = Vec::new();
-        img_resp.into_reader().read_to_end(&mut bytes).map_err(|e| format!("Read error: {}", e))?;
+        img_resp
+            .into_reader()
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("Read error: {}", e))?;
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let mime = if filename.ends_with(".png") { "image/png" }
-        else if filename.ends_with(".webp") { "image/webp" }
-        else if filename.ends_with(".gif") { "image/gif" }
-        else if filename.ends_with(".bmp") { "image/bmp" }
-        else { "image/jpeg" };
+        let mime = if filename.ends_with(".png") {
+            "image/png"
+        } else if filename.ends_with(".webp") {
+            "image/webp"
+        } else if filename.ends_with(".gif") {
+            "image/gif"
+        } else if filename.ends_with(".bmp") {
+            "image/bmp"
+        } else {
+            "image/jpeg"
+        };
         return Ok(format!("data:{};base64,{}", mime, b64));
     }
 }
@@ -410,7 +559,10 @@ fn write_output_file(folder: String, filename: String, content: String) -> Resul
 
     // Detect image files: content is base64, decode to raw bytes
     let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
-    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp");
+    let is_image = matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    );
     if is_image {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&content)
@@ -428,7 +580,9 @@ fn write_output_file(folder: String, filename: String, content: String) -> Resul
 // ═══════════════════════════════════════════════════════════════
 
 fn flowith_home() -> std::path::PathBuf {
-    dirs_next::home_dir().unwrap_or_else(|| Path::new(".").to_path_buf()).join(".flowith")
+    dirs_next::home_dir()
+        .unwrap_or_else(|| Path::new(".").to_path_buf())
+        .join(".flowith")
 }
 
 const LAUNCHER_DONE_FILE: &str = ".launcher_done";
@@ -442,27 +596,42 @@ fn log(app: &AppHandle, msg: &str) {
 }
 
 fn progress(app: &AppHandle, id: &str, pct: u64) {
-    let _ = app.emit("launcher-progress", serde_json::json!({"id": id, "percent": pct}));
+    let _ = app.emit(
+        "launcher-progress",
+        serde_json::json!({"id": id, "percent": pct}),
+    );
 }
 
 fn dep_status(app: &AppHandle, id: &str, status: &str) {
-    let _ = app.emit("launcher-dep-status", serde_json::json!({"id": id, "status": status}));
+    let _ = app.emit(
+        "launcher-dep-status",
+        serde_json::json!({"id": id, "status": status}),
+    );
 }
 
 /// Download a file with progress events, write to dest.
 fn download(app: &AppHandle, id: &str, url: &str, dest: &Path) -> Result<(), String> {
     log(app, &format!("Downloading {}...", url));
-    let resp = ureq::get(url).call().map_err(|e| format!("Download failed: {}", e))?;
-    let total: u64 = resp.header("Content-Length")
-        .and_then(|v| v.parse().ok()).unwrap_or(0);
+    let resp = ureq::get(url)
+        .call()
+        .map_err(|e| format!("Download failed: {}", e))?;
+    let total: u64 = resp
+        .header("Content-Length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let mut reader = resp.into_reader();
     let mut file = fs::File::create(dest).map_err(|e| format!("Cannot create file: {}", e))?;
     let mut buf = [0u8; 65536];
     let mut downloaded: u64 = 0;
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
-        if n == 0 { break; }
-        file.write_all(&buf[..n]).map_err(|e| format!("Write error: {}", e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Read error: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("Write error: {}", e))?;
         downloaded += n as u64;
         if total > 0 {
             progress(app, id, downloaded * 100 / total);
@@ -473,9 +642,15 @@ fn download(app: &AppHandle, id: &str, url: &str, dest: &Path) -> Result<(), Str
 }
 
 fn ollama_installed() -> bool {
-    for cmd in &["ollama", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"] {
+    for cmd in &[
+        "ollama",
+        "/usr/local/bin/ollama",
+        "/opt/homebrew/bin/ollama",
+    ] {
         if let Ok(out) = Command::new(cmd).arg("--version").output() {
-            if out.status.success() { return true; }
+            if out.status.success() {
+                return true;
+            }
         }
     }
     false
@@ -494,10 +669,7 @@ fn python_installed() -> Option<String> {
             "python",
         ]
     } else if cfg!(target_os = "windows") {
-        &[
-            "python",
-            "python3",
-        ]
+        &["python", "python3"]
     } else {
         &[
             "python3",
@@ -510,7 +682,9 @@ fn python_installed() -> Option<String> {
         if let Ok(out) = Command::new(cmd).arg("--version").output() {
             if out.status.success() {
                 let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if v.contains("3.") { return Some(v); }
+                if v.contains("3.") {
+                    return Some(v);
+                }
             }
         }
     }
@@ -540,13 +714,17 @@ fn git_installed() -> bool {
             .args(["--pkg-info", "com.apple.pkg.CLTools_Executables"])
             .output()
         {
-            if out.status.success() { return true; }
+            if out.status.success() {
+                return true;
+            }
         }
         // 5. Last resort: try running git but only at known real paths
         // (skip /usr/bin/git — it's the dangerous stub)
         for cmd in &["/opt/homebrew/bin/git", "/usr/local/bin/git"] {
             if let Ok(out) = Command::new(cmd).arg("--version").output() {
-                if out.status.success() { return true; }
+                if out.status.success() {
+                    return true;
+                }
             }
         }
         return false;
@@ -555,7 +733,9 @@ fn git_installed() -> bool {
     {
         for cmd in &["git"] {
             if let Ok(out) = Command::new(cmd).arg("--version").output() {
-                if out.status.success() { return true; }
+                if out.status.success() {
+                    return true;
+                }
             }
         }
         false
@@ -572,7 +752,9 @@ fn detect_system(app: AppHandle) -> Result<serde_json::Value, String> {
     // CPU
     let mut sys = System::new_all();
     sys.refresh_all();
-    let cpu = sys.cpus().first()
+    let cpu = sys
+        .cpus()
+        .first()
         .map(|c| c.brand().to_string())
         .unwrap_or_else(|| "Unknown".to_string());
 
@@ -590,7 +772,13 @@ fn detect_system(app: AppHandle) -> Result<serde_json::Value, String> {
         .map(|b| format!("{:.0} GB", b as f64 / 1_073_741_824.0))
         .unwrap_or_else(|_| "Unknown".to_string());
 
-    log(&app, &format!("Detected: {} | {} | RAM {} | GPU {} | Disk {}", os, cpu, ram, gpu, disk_free));
+    log(
+        &app,
+        &format!(
+            "Detected: {} | {} | RAM {} | GPU {} | Disk {}",
+            os, cpu, ram, gpu, disk_free
+        ),
+    );
 
     Ok(serde_json::json!({
         "os": os,
@@ -605,13 +793,21 @@ fn detect_system(app: AppHandle) -> Result<serde_json::Value, String> {
 fn detect_gpu() -> (String, bool) {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(out) = Command::new("system_profiler").args(["SPDisplaysDataType"]).output() {
+        if let Ok(out) = Command::new("system_profiler")
+            .args(["SPDisplaysDataType"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&out.stdout);
             // Extract chip/model line
             for line in text.lines() {
                 let t = line.trim();
                 if t.contains("Chipset Model:") || t.contains("Chip:") {
-                    let gpu = t.split(':').last().unwrap_or("Apple GPU").trim().to_string();
+                    let gpu = t
+                        .split(':')
+                        .last()
+                        .unwrap_or("Apple GPU")
+                        .trim()
+                        .to_string();
                     return (gpu, true);
                 }
             }
@@ -620,7 +816,10 @@ fn detect_gpu() -> (String, bool) {
     }
     #[cfg(target_os = "windows")]
     {
-        if let Ok(out) = Command::new("wmic").args(["path", "win32_VideoController", "get", "name"]).output() {
+        if let Ok(out) = Command::new("wmic")
+            .args(["path", "win32_VideoController", "get", "name"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&out.stdout);
             for line in text.lines().skip(1) {
                 let t = line.trim();
@@ -657,11 +856,13 @@ fn install_ollama(app: AppHandle) -> Result<(), String> {
         log(&app, "System may request permission to install Ollama.");
         let mount = Command::new("hdiutil")
             .args(["attach", "-nobrowse", dmg_path.to_str().unwrap()])
-            .output().map_err(|e| format!("hdiutil failed: {}", e))?;
+            .output()
+            .map_err(|e| format!("hdiutil failed: {}", e))?;
 
         let mount_output = String::from_utf8_lossy(&mount.stdout);
         // Find mount point
-        let vol = mount_output.lines()
+        let vol = mount_output
+            .lines()
             .filter(|l| l.contains("/Volumes/"))
             .last()
             .and_then(|l| l.split('\t').last())
@@ -672,7 +873,8 @@ fn install_ollama(app: AppHandle) -> Result<(), String> {
         let ollama_app = format!("{}/Ollama.app", vol);
         let status = Command::new("cp")
             .args(["-R", &ollama_app, "/Applications/Ollama.app"])
-            .status().map_err(|e| format!("Install failed: {}", e))?;
+            .status()
+            .map_err(|e| format!("Install failed: {}", e))?;
 
         // Detach
         let _ = Command::new("hdiutil").args(["detach", &vol]).status();
@@ -680,7 +882,9 @@ fn install_ollama(app: AppHandle) -> Result<(), String> {
 
         if !status.success() {
             dep_status(&app, "ollama", "failed");
-            return Err("Ollama installation failed. Download manually from https://ollama.com".into());
+            return Err(
+                "Ollama installation failed. Download manually from https://ollama.com".into(),
+            );
         }
     }
 
@@ -694,12 +898,15 @@ fn install_ollama(app: AppHandle) -> Result<(), String> {
         log(&app, "Installing Ollama (silent)...");
         let status = Command::new(exe_path.to_str().unwrap())
             .args(["/S"])
-            .status().map_err(|e| format!("Install failed: {}", e))?;
+            .status()
+            .map_err(|e| format!("Install failed: {}", e))?;
         let _ = fs::remove_file(&exe_path);
 
         if !status.success() {
             dep_status(&app, "ollama", "failed");
-            return Err("Ollama installation failed. Download manually from https://ollama.com".into());
+            return Err(
+                "Ollama installation failed. Download manually from https://ollama.com".into(),
+            );
         }
     }
 
@@ -715,7 +922,10 @@ fn pull_model(app: AppHandle) -> Result<(), String> {
         return Err("Ollama is not installed — cannot pull model".into());
     }
 
-    log(&app, "Pulling llama3.2:3b (~2GB). This may take a few minutes...");
+    log(
+        &app,
+        "Pulling llama3.2:3b (~2GB). This may take a few minutes...",
+    );
     dep_status(&app, "model", "installing");
 
     let status = Command::new("ollama")
@@ -748,10 +958,14 @@ fn install_python(app: AppHandle) -> Result<(), String> {
     {
         // Try Homebrew first — cleanest install path
         if Command::new("brew").arg("--version").output().is_ok() {
-            log(&app, "Installing Python via Homebrew (this may take several minutes)...");
+            log(
+                &app,
+                "Installing Python via Homebrew (this may take several minutes)...",
+            );
             let status = Command::new("brew")
                 .args(["install", "python@3.12"])
-                .status().map_err(|e| format!("brew failed: {}", e))?;
+                .status()
+                .map_err(|e| format!("brew failed: {}", e))?;
             if status.success() {
                 dep_status(&app, "python", "done");
                 log(&app, "Python installed via Homebrew.");
@@ -775,7 +989,8 @@ fn install_python(app: AppHandle) -> Result<(), String> {
         log(&app, "Installing Python (silent)...");
         let status = Command::new(exe.to_str().unwrap())
             .args(["/quiet", "InstallAllUsers=1", "PrependPath=1"])
-            .status().map_err(|e| format!("Install failed: {}", e))?;
+            .status()
+            .map_err(|e| format!("Install failed: {}", e))?;
         let _ = fs::remove_file(&exe);
         if !status.success() {
             dep_status(&app, "python", "failed");
@@ -799,8 +1014,13 @@ fn install_git(app: AppHandle) -> Result<(), String> {
     {
         // Try Homebrew first — avoids the blocking xcode-select dialog
         if Command::new("brew").arg("--version").output().is_ok() {
-            log(&app, "Installing Git via Homebrew (this may take a moment)...");
-            let br = Command::new("brew").args(["install", "git"]).status()
+            log(
+                &app,
+                "Installing Git via Homebrew (this may take a moment)...",
+            );
+            let br = Command::new("brew")
+                .args(["install", "git"])
+                .status()
                 .map_err(|e| format!("brew failed: {}", e))?;
             if br.success() {
                 dep_status(&app, "git", "done");
@@ -827,7 +1047,8 @@ fn install_git(app: AppHandle) -> Result<(), String> {
         log(&app, "Installing Git (silent)...");
         let status = Command::new(exe.to_str().unwrap())
             .args(["/VERYSILENT", "/NORESTART"])
-            .status().map_err(|e| format!("Install failed: {}", e))?;
+            .status()
+            .map_err(|e| format!("Install failed: {}", e))?;
         let _ = fs::remove_file(&exe);
         if !status.success() {
             dep_status(&app, "git", "failed");
@@ -863,15 +1084,28 @@ fn install_comfyui(app: AppHandle) -> Result<(), String> {
 
     // Clean up any partial clone from a previous failed attempt
     if comfy_dir.exists() {
-        log(&app, "Removing partial ComfyUI directory from previous attempt...");
+        log(
+            &app,
+            "Removing partial ComfyUI directory from previous attempt...",
+        );
         let _ = fs::remove_dir_all(&comfy_dir);
     }
 
     log(&app, "Cloning ComfyUI (shallow clone, ~200MB)...");
-    log(&app, "This may take several minutes depending on network speed.");
+    log(
+        &app,
+        "This may take several minutes depending on network speed.",
+    );
     let status = Command::new("git")
-        .args(["clone", "--depth", "1", "https://github.com/comfyanonymous/ComfyUI.git", comfy_dir.to_str().unwrap()])
-        .status().map_err(|e| format!("git clone failed: {}", e))?;
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            "https://github.com/comfyanonymous/ComfyUI.git",
+            comfy_dir.to_str().unwrap(),
+        ])
+        .status()
+        .map_err(|e| format!("git clone failed: {}", e))?;
 
     if !status.success() {
         // Clean up on failure
@@ -880,16 +1114,32 @@ fn install_comfyui(app: AppHandle) -> Result<(), String> {
         return Err("Failed to clone ComfyUI. Check your network connection and retry.".into());
     }
 
-    log(&app, "Installing ComfyUI Python dependencies (this may take a while)...");
+    log(
+        &app,
+        "Installing ComfyUI Python dependencies (this may take a while)...",
+    );
     let pip = python_pip_cmd();
     let pip_status = Command::new(pip.0)
-        .args(pip.1.iter().chain(&["-r", "requirements.txt"]).cloned().collect::<Vec<_>>())
+        .args(
+            pip.1
+                .iter()
+                .chain(&["-r", "requirements.txt"])
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
         .current_dir(&comfy_dir)
-        .status().map_err(|e| format!("pip install failed: {}", e))?;
+        .status()
+        .map_err(|e| format!("pip install failed: {}", e))?;
 
     if !pip_status.success() {
-        log(&app, "Warning: pip install had issues. You may need to install deps manually.");
-        log(&app, "Run: cd ~/.flowith/ComfyUI && pip install -r requirements.txt");
+        log(
+            &app,
+            "Warning: pip install had issues. You may need to install deps manually.",
+        );
+        log(
+            &app,
+            "Run: cd ~/.flowith/ComfyUI && pip install -r requirements.txt",
+        );
     }
 
     // Clone ComfyUI Manager plugin (optional)
@@ -899,18 +1149,32 @@ fn install_comfyui(app: AppHandle) -> Result<(), String> {
     if !mgr_dir.exists() {
         log(&app, "Installing ComfyUI Manager plugin...");
         let _ = Command::new("git")
-            .args(["clone", "--depth", "1", "https://github.com/ltdrdata/ComfyUI-Manager.git", mgr_dir.to_str().unwrap()])
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                "https://github.com/ltdrdata/ComfyUI-Manager.git",
+                mgr_dir.to_str().unwrap(),
+            ])
             .status();
     }
 
-    log(&app, "ComfyUI installed. Use ComfyUI Manager to download image generation models.");
+    log(
+        &app,
+        "ComfyUI installed. Use ComfyUI Manager to download image generation models.",
+    );
     dep_status(&app, "comfyui", "done");
     Ok(())
 }
 
 fn python_pip_cmd() -> (&'static str, Vec<&'static str>) {
     for cmd in &["python3", "python"] {
-        if Command::new(cmd).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        if Command::new(cmd)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
             return (cmd, vec!["-m", "pip", "install"]);
         }
     }
@@ -963,7 +1227,9 @@ fn find_python() -> Option<String> {
 }
 
 fn start_comfyui_at(_app: AppHandle, comfy_dir: &std::path::Path) -> Result<String, String> {
-    let mut guard = COMFYUI_PROCESS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut guard = COMFYUI_PROCESS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     if guard.is_some() {
         return Ok("ComfyUI is already running.".into());
     }
@@ -978,8 +1244,8 @@ fn start_comfyui_at(_app: AppHandle, comfy_dir: &std::path::Path) -> Result<Stri
     eprintln!("[ComfyUI] Starting: {} {}", python, main_py.display());
 
     let log_file = flowith_home().join("comfyui.log");
-    let stderr_f = fs::File::create(&log_file)
-        .map_err(|e| format!("Cannot create log file: {}", e))?;
+    let stderr_f =
+        fs::File::create(&log_file).map_err(|e| format!("Cannot create log file: {}", e))?;
 
     let child = Command::new(&python)
         .arg(&main_py)
@@ -1004,13 +1270,16 @@ fn start_comfyui_at(_app: AppHandle, comfy_dir: &std::path::Path) -> Result<Stri
 
 #[tauri::command]
 fn start_comfyui(_app: AppHandle) -> Result<String, String> {
-    let comfy_dir = find_comfyui().ok_or("ComfyUI not found. Install via Setup or place it at ~/ComfyUI.")?;
+    let comfy_dir =
+        find_comfyui().ok_or("ComfyUI not found. Install via Setup or place it at ~/ComfyUI.")?;
     start_comfyui_at(_app, &comfy_dir)
 }
 
 #[tauri::command]
 fn stop_comfyui(_app: AppHandle) -> Result<String, String> {
-    let mut guard = COMFYUI_PROCESS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut guard = COMFYUI_PROCESS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     if let Some(mut child) = guard.take() {
         eprintln!("[ComfyUI] Stopping PID {}...", child.id());
         let _ = child.kill();
@@ -1037,8 +1306,9 @@ fn get_comfyui_models(base_url: String) -> Result<Vec<serde_json::Value>, String
     let resp = ureq::get(&url)
         .call()
         .map_err(|e| format!("Cannot connect to ComfyUI: {}. Is ComfyUI running?", e))?;
-    let data: serde_json::Value =
-        resp.into_json().map_err(|e| format!("Invalid JSON from ComfyUI: {}", e))?;
+    let data: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Invalid JSON from ComfyUI: {}", e))?;
 
     // Extract checkpoint/models from object_info
     // ComfyUI nodes have a "CheckpointLoaderSimple" entry with model list in input/required
@@ -1074,11 +1344,11 @@ fn get_comfyui_models(base_url: String) -> Result<Vec<serde_json::Value>, String
 fn find_comfyui() -> Option<std::path::PathBuf> {
     // Common install locations, ordered by priority
     let candidates: Vec<std::path::PathBuf> = vec![
-        flowith_home().join("ComfyUI"),                          // Flowith managed install
-        dirs_next::home_dir()?.join("ComfyUI"),                  // ~/ComfyUI
-        dirs_next::home_dir()?.join("Documents").join("ComfyUI"),// ~/Documents/ComfyUI
-        dirs_next::home_dir()?.join("comfyui"),                  // lowercase variant
-        Path::new("/Applications/ComfyUI").to_path_buf(),        // System Applications
+        flowith_home().join("ComfyUI"),         // Flowith managed install
+        dirs_next::home_dir()?.join("ComfyUI"), // ~/ComfyUI
+        dirs_next::home_dir()?.join("Documents").join("ComfyUI"), // ~/Documents/ComfyUI
+        dirs_next::home_dir()?.join("comfyui"), // lowercase variant
+        Path::new("/Applications/ComfyUI").to_path_buf(), // System Applications
     ];
     for dir in &candidates {
         if dir.join("main.py").exists() {
@@ -1114,7 +1384,10 @@ fn auto_start_comfyui(app: &AppHandle) {
             return;
         }
     };
-    eprintln!("[ComfyUI] Launching from {}, starting...", comfy_dir.display());
+    eprintln!(
+        "[ComfyUI] Launching from {}, starting...",
+        comfy_dir.display()
+    );
     match start_comfyui_at(app.clone(), &comfy_dir) {
         Ok(msg) => eprintln!("[ComfyUI] {}", msg),
         Err(e) => eprintln!("[ComfyUI] Start failed: {}", e),
@@ -1157,21 +1430,39 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            get_app_status, open_folder, open_file,
-            read_settings, write_settings,
-            read_text_file, write_text_file, write_output_file,
-            cloud_llm_call, comfyui_generate,
-            test_comfyui_connection, get_comfyui_models,
+            get_app_status,
+            open_folder,
+            open_file,
+            read_settings,
+            write_settings,
+            read_text_file,
+            write_text_file,
+            write_output_file,
+            cloud_llm_call,
+            comfyui_generate,
+            test_comfyui_connection,
+            get_comfyui_models,
             // Launcher commands
-            detect_system, install_ollama, pull_model,
-            install_python, install_git, install_comfyui,
-            start_comfyui, stop_comfyui,
-            finish_launcher, relaunch_launcher, validate_comfyui_path,
+            detect_system,
+            install_ollama,
+            pull_model,
+            install_python,
+            install_git,
+            install_comfyui,
+            start_comfyui,
+            stop_comfyui,
+            finish_launcher,
+            relaunch_launcher,
+            validate_comfyui_path,
             // Knowledge Base commands
-            kb::kb_add_document, kb::kb_search, kb::kb_get_documents,
-            kb::kb_delete_document, kb::kb_get_context,
+            kb::kb_add_document,
+            kb::kb_search,
+            kb::kb_get_documents,
+            kb::kb_delete_document,
+            kb::kb_get_context,
             // Python backend commands
-            python_service::python_backend_status, python_service::python_backend_restart,
+            python_service::python_backend_status,
+            python_service::python_backend_restart,
         ])
         .setup(|app| {
             // Skip launcher if user has already completed setup

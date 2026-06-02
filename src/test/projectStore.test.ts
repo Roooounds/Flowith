@@ -52,6 +52,14 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   message: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock database service — forces sync localStorage fallback so tests don't need to await microtasks
+vi.mock("@/services/databaseService", () => ({
+  loadAllProjects: vi.fn().mockResolvedValue({ projects: [], activeProjectId: null }),
+  // Synchronous throw so saveProjects falls through to localStorage.setItem immediately
+  saveAllProjects: vi.fn(() => { throw new Error("no-sqlite"); }),
+  migrateFromLocalStorage: vi.fn().mockResolvedValue(false),
+}));
+
 // ─── Helpers ────────────────────────────────────────────────────
 
 function createTestAgent(): Omit<AgentProfile, "agentId" | "createdAt" | "updatedAt"> {

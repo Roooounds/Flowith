@@ -94,8 +94,9 @@ fn get_embedding(text: &str, model: &str) -> Result<Vec<f32>, String> {
         .send_json(&body)
         .map_err(|e| format!("Ollama embed request failed: {}. Is Ollama running?", e))?;
 
-    let json: serde_json::Value =
-        resp.into_json().map_err(|e| format!("Parse embed response failed: {}", e))?;
+    let json: serde_json::Value = resp
+        .into_json()
+        .map_err(|e| format!("Parse embed response failed: {}", e))?;
 
     let embedding: Vec<f32> = json["embedding"]
         .as_array()
@@ -191,7 +192,13 @@ pub fn kb_add_document(
     conn.execute(
         "INSERT INTO kb_embeddings (doc_id, project_id, embedding, model, dimensions)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![doc_id, project_id, blob, DEFAULT_EMBED_MODEL, dimensions as i64],
+        params![
+            doc_id,
+            project_id,
+            blob,
+            DEFAULT_EMBED_MODEL,
+            dimensions as i64
+        ],
     )
     .map_err(|e| format!("Insert embedding failed: {}", e))?;
 
@@ -250,7 +257,11 @@ pub fn kb_search(
         })
         .collect();
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(top_k);
 
     Ok(results)
@@ -291,10 +302,16 @@ pub fn kb_delete_document(doc_id: String) -> Result<(), String> {
     let guard = get_db()?;
     let conn = guard.as_ref().unwrap();
 
-    conn.execute("DELETE FROM kb_embeddings WHERE doc_id = ?1", params![doc_id])
-        .map_err(|e| format!("Delete embedding failed: {}", e))?;
-    conn.execute("DELETE FROM kb_documents WHERE doc_id = ?1", params![doc_id])
-        .map_err(|e| format!("Delete document failed: {}", e))?;
+    conn.execute(
+        "DELETE FROM kb_embeddings WHERE doc_id = ?1",
+        params![doc_id],
+    )
+    .map_err(|e| format!("Delete embedding failed: {}", e))?;
+    conn.execute(
+        "DELETE FROM kb_documents WHERE doc_id = ?1",
+        params![doc_id],
+    )
+    .map_err(|e| format!("Delete document failed: {}", e))?;
 
     Ok(())
 }

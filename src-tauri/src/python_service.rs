@@ -1,7 +1,6 @@
 /// Manages the Python FastAPI backend subprocess lifecycle.
 /// Spawns Python on app startup, monitors health, and exposes status to the frontend.
 /// Uses ureq (already a dependency) for HTTP — no extra crates needed.
-
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::thread;
@@ -20,7 +19,10 @@ pub fn start_python_backend() -> Result<String, String> {
 
     let main_py = backend_dir.join("main.py");
     if !main_py.exists() {
-        return Err(format!("backend/main.py not found at {}", main_py.display()));
+        return Err(format!(
+            "backend/main.py not found at {}",
+            main_py.display()
+        ));
     }
 
     // Install dependencies if needed
@@ -36,7 +38,9 @@ pub fn start_python_backend() -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Failed to start Python backend: {}", e))?;
 
-    let mut proc = PYTHON_PROCESS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut proc = PYTHON_PROCESS
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
     *proc = Some(child);
     drop(proc);
 
@@ -144,6 +148,9 @@ pub fn python_backend_restart() -> Result<String, String> {
 pub fn auto_start(_app: &AppHandle) {
     match start_python_backend() {
         Ok(dir) => log::info!("Python backend started from {}", dir),
-        Err(e) => log::warn!("Python backend did not start: {} — some features will be limited", e),
+        Err(e) => log::warn!(
+            "Python backend did not start: {} — some features will be limited",
+            e
+        ),
     }
 }

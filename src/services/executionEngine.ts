@@ -164,8 +164,8 @@ export async function executeWorkflow(
       if (out !== undefined) upstreamOutputs[uid] = out;
     }
 
-    // For Decision nodes: skip if no upstream has produced output yet
-    if (node.type === "decision" && Object.keys(upstreamOutputs).length === 0) {
+    // For Decision nodes with upstream: skip if no upstream has produced output yet
+    if (node.type === "decision" && upstreamIds.length > 0 && Object.keys(upstreamOutputs).length === 0) {
       logger.debug("execution", `Decision node ${nodeId.slice(0, 8)} has no upstream outputs yet, waiting`);
       iterationCounts.set(nodeId, iter - 1);
       continue;

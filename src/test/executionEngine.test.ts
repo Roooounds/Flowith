@@ -242,6 +242,8 @@ describe("executeWorkflow", () => {
         expect.objectContaining({ agentId: "a1", name: "Worker" }),
         "Task: Write a poem",
         undefined,
+        "task1",
+        undefined,
       );
     });
 
@@ -270,12 +272,16 @@ describe("executeWorkflow", () => {
         }),
         expect.any(String),
         undefined,
+        "task1",
+        undefined,
       );
       expect(llmService.call).toHaveBeenCalledWith(
         expect.objectContaining({
           systemPrompt: expect.stringContaining("Dragon facts: dragons breathe fire."),
         }),
         expect.any(String),
+        undefined,
+        "task1",
         undefined,
       );
     });
@@ -300,6 +306,8 @@ describe("executeWorkflow", () => {
       expect(llmService.call).toHaveBeenCalledWith(
         expect.objectContaining({ systemPrompt: "You are a writer." }),
         expect.any(String),
+        undefined,
+        "task1",
         undefined,
       );
     });
