@@ -284,3 +284,18 @@ export async function saveAllProjects(
     console.error("[DB] saveAllProjects failed:", e);
   }
 }
+
+// ─── Clear all data (for factory reset) ───
+
+export async function clearAllData(): Promise<void> {
+  try {
+    const database = await getDb();
+    await database.execute("DELETE FROM kb_embeddings");
+    await database.execute("DELETE FROM kb_documents");
+    await database.execute("DELETE FROM app_state");
+    await database.execute("DELETE FROM projects");
+    console.log("[DB] All data cleared for factory reset");
+  } catch (e) {
+    console.error("[DB] clearAllData failed:", e);
+  }
+}

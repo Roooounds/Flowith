@@ -222,7 +222,7 @@ export class ComfyUITimeoutError extends FlowithAgentError {
   constructor(rawMessage?: string) {
     super(
       ErrorCode.COMFYUI_TIMEOUT,
-      "ComfyUI 图像生成超时（90秒）",
+      "ComfyUI 图像生成超时 — 可能需要几分钟",
       "建议：1) 降低分辨率或采样步数 2) 检查 GPU 是否被其他任务占用",
       "error",
       true,

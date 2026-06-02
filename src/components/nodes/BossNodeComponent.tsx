@@ -30,11 +30,11 @@ const TYPE_CONFIG: Record<NodeType, { icon: JSX.Element; accent: string; handle:
   logic: {
     icon: (
       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h18L15 10.5v6l-6 3v-9L3 4.5z" />
       </svg>
     ),
-    accent: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-    handle: "!bg-purple-400",
+    accent: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+    handle: "!bg-cyan-400",
   },
   decision: {
     icon: (
@@ -51,8 +51,8 @@ const TYPE_CONFIG: Record<NodeType, { icon: JSX.Element; accent: string; handle:
         <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
       </svg>
     ),
-    accent: "bg-teal-500/10 text-teal-400 border-teal-500/20",
-    handle: "!bg-teal-400",
+    accent: "bg-violet-500/10 text-violet-400 border-violet-500/20",
+    handle: "!bg-violet-400",
   },
   loop: {
     icon: (
@@ -60,8 +60,8 @@ const TYPE_CONFIG: Record<NodeType, { icon: JSX.Element; accent: string; handle:
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
       </svg>
     ),
-    accent: "bg-pink-500/10 text-pink-400 border-pink-500/20",
-    handle: "!bg-pink-400",
+    accent: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    handle: "!bg-emerald-400",
   },
   output: {
     icon: (
@@ -150,7 +150,7 @@ function BossNodeComponent({ id, data, selected }: NodeProps) {
   return (
     <div
       className={`node-card group ${selected ? "selected" : ""} ${errorBorderClass}`}
-      style={{ width: currentW, height: currentH, minWidth: 260, minHeight: 120 }}
+      style={{ width: currentW, minHeight: Math.max(currentH, 120) }}
     >
       {nodeType !== "input" && (
         <Handle type="target" position={Position.Top} className={`!w-3 !h-3 !border-2 !border-boss-surface ${config.handle} transition-colors`} />
@@ -241,6 +241,15 @@ function BossNodeComponent({ id, data, selected }: NodeProps) {
             </span>
           )}
         </p>
+
+        {/* Output preview — show when completed with cached result */}
+        {status === "completed" && nodeData.outputCache && (
+          <div className="mb-2 px-2 py-1 rounded bg-boss-success/5 border border-boss-success/10">
+            <p className="text-[10px] text-boss-text-muted leading-relaxed line-clamp-2 font-mono break-all">
+              {nodeData.outputCache.slice(0, 300)}
+            </p>
+          </div>
+        )}
 
         {/* Agent avatars */}
         <div className="flex items-center justify-between pt-2 border-t border-boss-border">

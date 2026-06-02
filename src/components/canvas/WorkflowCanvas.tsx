@@ -372,7 +372,7 @@ export default function WorkflowCanvas() {
   const defaultEdgeOptions = useMemo(
     () => ({
       type: "smoothstep" as const,
-      animated: false,
+      animated: true,
       style: { stroke: "#4a4f5e", strokeWidth: 2 },
       markerEnd: {
         type: MarkerType.ArrowClosed,

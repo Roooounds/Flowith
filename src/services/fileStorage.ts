@@ -172,10 +172,9 @@ function detectContentType(content: string, nodeType: string): {
   const imgMatch = content.match(/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);base64,(.+)/i);
   if (imgMatch) {
     const mimeType = imgMatch[1].replace("+xml", "").replace("jpeg", "jpg");
-    const binary = atob(imgMatch[2]);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return { ext: `.${mimeType}`, data: new Blob([bytes]).toString(), icon: "🖼️" };
+    // Pass base64 data (without prefix) — Rust backend will decode for binary write
+    const b64 = imgMatch[2];
+    return { ext: `.${mimeType}`, data: b64, icon: "🖼️" };
   }
   const vidMatch = content.match(/^data:video\/(mp4|webm|mov);base64,/i);
   if (vidMatch) {

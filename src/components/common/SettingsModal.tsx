@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { getLLMConfig, configureLLM } from "@/services/llmService";
 import { getAppConfig, updateAppConfig, applyAppTheme } from "@/services/appConfig";
 import type { FlowithAppConfig, ThemeMode } from "@/services/appConfig";
 import { useLanguage, useT } from "@/i18n";
+import { useProjectStore } from "@/stores/projectStore";
 import type { LLMServiceConfig, CustomModelConfig } from "@/services/llmService";
 
 import LogsPanel from "./LogsPanel";
@@ -17,6 +18,23 @@ export default function SettingsModal({ onClose }: Props) {
   const { lang, setLanguage } = useLanguage();
   const t = useT();
   const [tab, setTab] = useState<Tab>("llm");
+
+  // ── Factory reset ──────────────────────────────────────────────
+  const handleReset = useCallback(async () => {
+    if (!confirm(t.settings.reset.confirm)) return;
+    try {
+      sessionStorage.setItem("boss_skip_auto_bootstrap", "1");
+      useProjectStore.setState({ projects: [], activeProjectId: null, project: null, canvasNodes: [], canvasEdges: [] });
+      localStorage.clear();
+      try {
+        const { clearAllData } = await import("@/services/databaseService");
+        await clearAllData();
+      } catch { /* SQLite not available */ }
+      onClose();
+    } catch (e) {
+      console.error("[Reset] Failed:", e);
+    }
+  }, [t.settings.reset.confirm, onClose]);
 
   // ── LLM helpers ──
   const saveLlm = (partial: Partial<LLMServiceConfig>) => {
@@ -125,7 +143,7 @@ export default function SettingsModal({ onClose }: Props) {
                 </div>
                 <div className="p-3 rounded-lg border border-boss-border bg-boss-bg/50">
                   <div className="flex items-center gap-2 mb-2"><span>🎨</span><span className="text-xs font-medium text-boss-text">{t.settings.comfyui.label}</span></div>
-                  <input type="text" value={llmCfg.comfyuiBaseUrl || ""} onChange={e => saveLlm({ comfyuiBaseUrl: e.target.value })} placeholder={t.settings.comfyui.placeholder} className="w-full px-3 py-1.5 bg-boss-bg border border-boss-border rounded text-xs font-mono text-boss-text focus:outline-none focus:border-boss-accent transition-colors" />
+                  <div className="flex items-center gap-2"><input type="text" value={llmCfg.comfyuiBaseUrl || ""} onChange={e => saveLlm({ comfyuiBaseUrl: e.target.value })} placeholder={t.settings.comfyui.placeholder} className="flex-1 px-3 py-1.5 bg-boss-bg border border-boss-border rounded text-xs font-mono text-boss-text focus:outline-none focus:border-boss-accent transition-colors" /><button onClick={async () => { try { const { invoke } = await import("@tauri-apps/api/core"); await invoke("test_comfyui_connection", { baseUrl: llmCfg.comfyuiBaseUrl || "http://localhost:8188" }); alert(t.settings.connected); } catch { alert(t.settings.connectionFailed); }}} className="px-3 py-1.5 rounded border border-boss-border hover:border-boss-accent text-[10px] shrink-0">{t.settings.ollama.test}</button></div>
                 </div>
               </div>
 
@@ -284,8 +302,8 @@ export default function SettingsModal({ onClose }: Props) {
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-boss-border shrink-0 gap-2">
           <div className="flex items-center gap-2">
-            <button onClick={async () => { try { const { invoke } = await import("@tauri-apps/api/core"); await invoke("relaunch_launcher"); } catch { /* not in Tauri */ } }} className="px-3 py-1.5 rounded-lg border border-boss-border text-[10px] text-boss-text-muted hover:text-boss-text hover:border-boss-border-active transition-colors">{t.settings.redetect}</button>
-            <button onClick={() => { if (confirm(t.settings.reset.confirm)) { sessionStorage.setItem("boss_skip_auto_bootstrap", "1"); localStorage.clear(); window.location.reload(); }}} className="px-3 py-1.5 rounded-lg border border-boss-error/30 text-[10px] text-boss-error hover:bg-boss-error/10">{t.settings.reset.button}</button>
+            <button onClick={async () => { try { const { invoke } = await import("@tauri-apps/api/core"); await invoke("relaunch_launcher"); } catch { window.location.reload(); } }} className="px-3 py-1.5 rounded-lg border border-boss-border text-[10px] text-boss-text-muted hover:text-boss-text hover:border-boss-border-active transition-colors">{t.settings.redetect}</button>
+            <button onClick={handleReset} className="px-3 py-1.5 rounded-lg border border-boss-error/30 text-[10px] text-boss-error hover:bg-boss-error/10">{t.settings.reset.button}</button>
           </div>
           <div className="flex items-center gap-2"><span className="text-[9px] text-boss-text-muted/50">{t.settings.footer.autoSaved}</span><button onClick={onClose} className="px-4 py-1.5 rounded-lg bg-boss-accent hover:bg-boss-accent-hover text-white text-xs font-medium">{t.settings.footer.done}</button></div>
         </div>

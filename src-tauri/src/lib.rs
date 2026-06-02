@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use base64::Engine;
@@ -154,19 +155,191 @@ fn cloud_llm_call(provider: String, api_key: String, model: String, system_promp
     }
 }
 
+/// Convert ComfyUI editor-format workflow (with "nodes" array) to API format
+fn convert_editor_workflow(raw: &serde_json::Value, model: &str) -> Option<serde_json::Value> {
+    let nodes_arr = raw.get("nodes")?.as_array()?;
+    let links_arr = raw.get("links").and_then(|v| v.as_array());
+    let mut link_map: std::collections::HashMap<u64, (String, usize)> = std::collections::HashMap::new();
+    if let Some(links) = links_arr {
+        for link in links {
+            let arr = link.as_array()?;
+            let link_id = arr[0].as_u64()?;
+            let src_id = arr[1].as_u64()?;
+            let src_slot = arr[2].as_u64()? as usize;
+            link_map.insert(link_id, (src_id.to_string(), src_slot));
+        }
+    }
+    let mut api: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    for node in nodes_arr {
+        let id = node.get("id")?.as_u64()?;
+        let class_type = node.get("type")?.as_str()?;
+        let widgets_values = node.get("widgets_values").and_then(|v| v.as_array());
+        let mut inputs: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        if let Some(wv) = widgets_values {
+            match class_type {
+                "KSampler" | "KSamplerAdvanced" => {
+                    inputs.insert("seed".into(), wv.get(0).cloned().unwrap_or(serde_json::json!(0)));
+                    inputs.insert("steps".into(), wv.get(1).cloned().unwrap_or(serde_json::json!(20)));
+                    inputs.insert("cfg".into(), wv.get(2).cloned().unwrap_or(serde_json::json!(7.0)));
+                    inputs.insert("sampler_name".into(), wv.get(3).cloned().unwrap_or(serde_json::json!("euler")));
+                    inputs.insert("scheduler".into(), wv.get(4).cloned().unwrap_or(serde_json::json!("normal")));
+                    inputs.insert("denoise".into(), wv.get(5).cloned().unwrap_or(serde_json::json!(1.0)));
+                }
+                "CheckpointLoaderSimple" => {
+                    inputs.insert("ckpt_name".into(), serde_json::json!(model));
+                }
+                "EmptyLatentImage" => {
+                    inputs.insert("width".into(), wv.get(0).cloned().unwrap_or(serde_json::json!(512)));
+                    inputs.insert("height".into(), wv.get(1).cloned().unwrap_or(serde_json::json!(512)));
+                    inputs.insert("batch_size".into(), wv.get(2).cloned().unwrap_or(serde_json::json!(1)));
+                }
+                "SaveImage" | "PreviewImage" => {
+                    inputs.insert("filename_prefix".into(), wv.get(0).cloned().unwrap_or(serde_json::json!("Flowith")));
+                }
+                _ => {}
+            }
+        }
+        if class_type == "CheckpointLoaderSimple" {
+            inputs.insert("ckpt_name".into(), serde_json::json!(model));
+        }
+        if let Some(inputs_arr) = node.get("inputs").and_then(|v| v.as_array()) {
+            for inp in inputs_arr {
+                let name = inp.get("name")?.as_str()?;
+                if let Some(link_id) = inp.get("link").and_then(|v| v.as_u64()) {
+                    if let Some((src_id, src_slot)) = link_map.get(&link_id) {
+                        inputs.insert(name.into(), serde_json::json!([src_id, src_slot]));
+                    }
+                }
+            }
+        }
+        api.insert(id.to_string(), serde_json::json!({
+            "class_type": class_type,
+            "inputs": inputs,
+        }));
+    }
+    Some(serde_json::Value::Object(api))
+}
+
+/// Inject prompt text into a ComfyUI API-format workflow.
+/// Strategy:
+/// 1. Replace {{prompt}} / {{input}} markers in CLIPTextEncode text fields
+/// 2. Replace {{negative_prompt}} markers
+/// 3. If no markers found, auto-inject into the positive CLIPTextEncode (traced via KSampler)
+fn inject_prompt_into_workflow(workflow: &mut serde_json::Value, prompt: &str, negative_prompt: Option<&str>) {
+    let obj = match workflow.as_object_mut() { Some(o) => o, None => return };
+    let neg = negative_prompt.unwrap_or("");
+    let mut found_marker = false;
+
+    // Pass 1: Replace {{prompt}} / {{input}} / {{negative_prompt}} markers
+    for (_key, node) in obj.iter_mut() {
+        if node.get("class_type").and_then(|v| v.as_str()) != Some("CLIPTextEncode") { continue; }
+        let text_val = match node.pointer("/inputs/text").and_then(|v| v.as_str()).map(|s| s.to_owned()) {
+            Some(t) => t,
+            None => continue,
+        };
+        if text_val.contains("{{prompt}}") || text_val.contains("{{input}}") {
+            found_marker = true;
+            let replaced = text_val.replace("{{prompt}}", prompt).replace("{{input}}", prompt);
+            if let Some(inputs) = node.get_mut("inputs").and_then(|v| v.as_object_mut()) {
+                inputs.insert("text".into(), serde_json::json!(replaced));
+            }
+        } else if text_val.contains("{{negative_prompt}}") {
+            found_marker = true;
+            let replaced = text_val.replace("{{negative_prompt}}", neg);
+            if let Some(inputs) = node.get_mut("inputs").and_then(|v| v.as_object_mut()) {
+                inputs.insert("text".into(), serde_json::json!(replaced));
+            }
+        }
+    }
+    if found_marker { return; }
+
+    // Pass 2: No markers — auto-inject into the positive CLIPTextEncode
+    let mut positive_node_key: Option<String> = None;
+    for (_key, node) in obj.iter() {
+        let ct = match node.get("class_type").and_then(|v| v.as_str()) { Some(c) => c, None => continue };
+        if ct == "KSampler" || ct == "KSamplerAdvanced" {
+            if let Some(pos_link) = node.pointer("/inputs/positive").and_then(|v| v.as_array()) {
+                if let Some(src_id) = pos_link.get(0).and_then(|v| v.as_u64()) {
+                    positive_node_key = Some(src_id.to_string());
+                    break;
+                }
+            }
+        }
+    }
+    let mut inject_key = positive_node_key;
+    if inject_key.is_none() {
+        let mut keys: Vec<(u64, String)> = Vec::new();
+        for (key, node) in obj.iter() {
+            if node.get("class_type").and_then(|v| v.as_str()) == Some("CLIPTextEncode") {
+                if let Ok(num) = key.parse::<u64>() { keys.push((num, key.clone())); }
+            }
+        }
+        keys.sort_by_key(|k| k.0);
+        inject_key = keys.first().map(|(_, k)| k.clone());
+    }
+    if let Some(ref key) = inject_key {
+        if let Some(node) = obj.get_mut(key) {
+            if let Some(inputs) = node.get_mut("inputs").and_then(|v| v.as_object_mut()) {
+                inputs.insert("text".into(), serde_json::json!(prompt));
+            }
+        }
+    }
+}
+
 #[tauri::command]
-fn comfyui_generate(base_url: String, model: String, prompt: String) -> Result<String, String> {
+fn comfyui_generate(
+    base_url: String, model: String, prompt: String,
+    width: Option<u32>, height: Option<u32>, steps: Option<u32>,
+    cfg_scale: Option<f64>, seed: Option<u64>, negative_prompt: Option<String>,
+    workflow_json: Option<String>,
+) -> Result<String, String> {
     let url = base_url.trim_end_matches('/');
 
-    let workflow = serde_json::json!({
-        "1": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
-        "2": { "class_type": "EmptyLatentImage", "inputs": { "width": 512, "height": 512, "batch_size": 1 } },
-        "3": { "class_type": "KSampler", "inputs": { "seed": rand::random::<u64>() % 1_000_000_000, "steps": 20, "cfg": 7.0, "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0, "model": ["4", 0], "positive": ["1", 0], "negative": ["5", 0], "latent_image": ["2", 0] } },
-        "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": model } },
-        "5": { "class_type": "CLIPTextEncode", "inputs": { "text": "bad quality, blurry, distorted", "clip": ["4", 1] } },
-        "6": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
-        "7": { "class_type": "SaveImage", "inputs": { "filename_prefix": "Flowith", "images": ["6", 0] } },
-    });
+    let workflow = if let Some(ref json_str) = workflow_json {
+        let raw: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| format!("Invalid workflow JSON: {}", e))?;
+        if raw.get("nodes").and_then(|v| v.as_array()).is_some() {
+            convert_editor_workflow(&raw, &model)
+                .ok_or("Failed to convert editor workflow to API format")?
+        } else {
+            raw
+        }
+    } else {
+        let w = width.unwrap_or(512);
+        let h = height.unwrap_or(512);
+        let s = steps.unwrap_or(20);
+        let c = cfg_scale.unwrap_or(7.0);
+        let sd = seed.unwrap_or(rand::random::<u64>() % 1_000_000_000);
+        let np = negative_prompt.clone().unwrap_or_else(|| "bad quality, blurry, distorted".to_string());
+        serde_json::json!({
+            "1": { "class_type": "CLIPTextEncode", "inputs": { "text": prompt, "clip": ["4", 1] } },
+            "2": { "class_type": "EmptyLatentImage", "inputs": { "width": w, "height": h, "batch_size": 1 } },
+            "3": { "class_type": "KSampler", "inputs": { "seed": sd, "steps": s, "cfg": c, "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0, "model": ["4", 0], "positive": ["1", 0], "negative": ["5", 0], "latent_image": ["2", 0] } },
+            "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": model } },
+            "5": { "class_type": "CLIPTextEncode", "inputs": { "text": np, "clip": ["4", 1] } },
+            "6": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+            "7": { "class_type": "SaveImage", "inputs": { "filename_prefix": "Flowith", "images": ["6", 0] } },
+        })
+    };
+
+    // Inject upstream prompt into custom workflows via {{prompt}} markers or auto-detection
+    let mut workflow = workflow;
+    if workflow_json.is_some() {
+        inject_prompt_into_workflow(&mut workflow, &prompt, negative_prompt.as_deref());
+    }
+
+    // Dynamically find all SaveImage / PreviewImage node IDs in the workflow
+    let save_node_ids: Vec<String> = workflow.as_object()
+        .map(|obj| {
+            obj.iter()
+                .filter(|(_, node)| {
+                    matches!(node.get("class_type").and_then(|v| v.as_str()),
+                        Some("SaveImage") | Some("PreviewImage"))
+                })
+                .map(|(k, _)| k.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let resp = ureq::post(&format!("{}/prompt", url))
         .set("Content-Type", "application/json")
@@ -182,16 +355,30 @@ fn comfyui_generate(base_url: String, model: String, prompt: String) -> Result<S
     let result: serde_json::Value = resp.into_json().map_err(|e| format!("Parse error: {}", e))?;
     let prompt_id = result["prompt_id"].as_str().ok_or("No prompt_id in response")?.to_string();
 
-    for _ in 0..45 {
-        thread::sleep(Duration::from_secs(2));
+    loop {
+        thread::sleep(Duration::from_secs(1));
         let hist_url = format!("{}/history/{}", url, prompt_id);
         let hist = ureq::get(&hist_url).call().map_err(|e| format!("History fetch error: {}", e))?;
         if hist.status() != 200 { continue; }
         let data: serde_json::Value = hist.into_json().map_err(|_| "Invalid history JSON")?;
         let outputs = &data[&prompt_id]["outputs"];
-        let images = outputs["7"]["images"].as_array();
-        if images.is_none() || images.unwrap().is_empty() { continue; }
-        let img = &images.unwrap()[0];
+
+        let mut found_img: Option<&serde_json::Value> = None;
+        for nid in &save_node_ids {
+            if let Some(imgs) = outputs[nid]["images"].as_array() {
+                if !imgs.is_empty() { found_img = Some(&imgs[0]); break; }
+            }
+        }
+        if found_img.is_none() {
+            if let Some(obj) = outputs.as_object() {
+                for (_nid, node_out) in obj {
+                    if let Some(imgs) = node_out["images"].as_array() {
+                        if !imgs.is_empty() { found_img = Some(&imgs[0]); break; }
+                    }
+                }
+            }
+        }
+        let img = match found_img { Some(i) => i, None => continue };
         let filename = img["filename"].as_str().unwrap_or("");
         let subfolder = img["subfolder"].as_str().unwrap_or("");
         let img_url = format!("{}/view?filename={}&subfolder={}&type=output", url, filename, subfolder);
@@ -201,11 +388,13 @@ fn comfyui_generate(base_url: String, model: String, prompt: String) -> Result<S
         img_resp.into_reader().read_to_end(&mut bytes).map_err(|e| format!("Read error: {}", e))?;
 
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let mime = if filename.ends_with(".png") { "image/png" } else { "image/jpeg" };
+        let mime = if filename.ends_with(".png") { "image/png" }
+        else if filename.ends_with(".webp") { "image/webp" }
+        else if filename.ends_with(".gif") { "image/gif" }
+        else if filename.ends_with(".bmp") { "image/bmp" }
+        else { "image/jpeg" };
         return Ok(format!("data:{};base64,{}", mime, b64));
     }
-
-    Err("ComfyUI generation timed out (90s)".into())
 }
 
 #[tauri::command]
@@ -218,7 +407,19 @@ fn write_output_file(folder: String, filename: String, content: String) -> Resul
     let outputs_dir = Path::new(&folder).join("outputs");
     fs::create_dir_all(&outputs_dir).map_err(|e| format!("Cannot create outputs dir: {}", e))?;
     let file_path = outputs_dir.join(&filename);
-    fs::write(&file_path, &content).map_err(|e| format!("Cannot write file: {}", e))?;
+
+    // Detect image files: content is base64, decode to raw bytes
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp");
+    if is_image {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&content)
+            .map_err(|e| format!("Base64 decode error: {}", e))?;
+        fs::write(&file_path, &bytes).map_err(|e| format!("Cannot write file: {}", e))?;
+    } else {
+        fs::write(&file_path, &content).map_err(|e| format!("Cannot write file: {}", e))?;
+    }
+
     Ok(file_path.to_string_lossy().to_string())
 }
 
@@ -743,6 +944,183 @@ fn finish_launcher(app: AppHandle, skipped: bool) -> Result<(), String> {
     Ok(())
 }
 
+// ─── ComfyUI auto-start ──────────────────────────────────────────
+
+static COMFYUI_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+
+fn find_python() -> Option<String> {
+    for candidate in &["python3", "python"] {
+        if Command::new(candidate)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn start_comfyui_at(_app: AppHandle, comfy_dir: &std::path::Path) -> Result<String, String> {
+    let mut guard = COMFYUI_PROCESS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    if guard.is_some() {
+        return Ok("ComfyUI is already running.".into());
+    }
+
+    let python = find_python().ok_or("Python not found. Install Python 3.10+ first.")?;
+    let main_py = comfy_dir.join("main.py");
+
+    if !main_py.exists() {
+        return Err(format!("main.py not found at {}", main_py.display()));
+    }
+
+    eprintln!("[ComfyUI] Starting: {} {}", python, main_py.display());
+
+    let log_file = flowith_home().join("comfyui.log");
+    let stderr_f = fs::File::create(&log_file)
+        .map_err(|e| format!("Cannot create log file: {}", e))?;
+
+    let child = Command::new(&python)
+        .arg(&main_py)
+        .arg("--enable-cors-header")
+        .current_dir(comfy_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(stderr_f))
+        .spawn()
+        .map_err(|e| format!("Failed to start ComfyUI: {}", e))?;
+
+    eprintln!("[ComfyUI] stderr output -> {}", log_file.display());
+
+    let pid = child.id();
+    *guard = Some(child);
+    eprintln!("[ComfyUI] Started (PID {})", pid);
+
+    // Give it a moment to start up
+    thread::sleep(Duration::from_secs(2));
+
+    Ok("ComfyUI started".into())
+}
+
+#[tauri::command]
+fn start_comfyui(_app: AppHandle) -> Result<String, String> {
+    let comfy_dir = find_comfyui().ok_or("ComfyUI not found. Install via Setup or place it at ~/ComfyUI.")?;
+    start_comfyui_at(_app, &comfy_dir)
+}
+
+#[tauri::command]
+fn stop_comfyui(_app: AppHandle) -> Result<String, String> {
+    let mut guard = COMFYUI_PROCESS.lock().map_err(|e| format!("Lock error: {}", e))?;
+    if let Some(mut child) = guard.take() {
+        eprintln!("[ComfyUI] Stopping PID {}...", child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        eprintln!("[ComfyUI] Stopped.");
+        Ok("ComfyUI stopped".into())
+    } else {
+        Ok("ComfyUI was not running.".into())
+    }
+}
+
+#[tauri::command]
+fn test_comfyui_connection(base_url: String) -> Result<String, String> {
+    let url = format!("{}/system_stats", base_url.trim_end_matches('/'));
+    ureq::get(&url)
+        .call()
+        .map_err(|e| format!("ComfyUI not reachable: {}", e))?;
+    Ok("Connected".into())
+}
+
+#[tauri::command]
+fn get_comfyui_models(base_url: String) -> Result<Vec<serde_json::Value>, String> {
+    let url = format!("{}/object_info", base_url.trim_end_matches('/'));
+    let resp = ureq::get(&url)
+        .call()
+        .map_err(|e| format!("Cannot connect to ComfyUI: {}. Is ComfyUI running?", e))?;
+    let data: serde_json::Value =
+        resp.into_json().map_err(|e| format!("Invalid JSON from ComfyUI: {}", e))?;
+
+    // Extract checkpoint/models from object_info
+    // ComfyUI nodes have a "CheckpointLoaderSimple" entry with model list in input/required
+    let mut models = Vec::new();
+    if let Some(obj) = data.as_object() {
+        for (_key, node_info) in obj {
+            if let Some(input) = node_info.get("input") {
+                if let Some(required) = input.get("required") {
+                    if let Some(ckpt) = required.get("ckpt_name") {
+                        // ckpt_name is typically [["model1.safetensors", "model2.safetensors", ...]]
+                        if let Some(list) = ckpt.as_array() {
+                            if let Some(first) = list.first() {
+                                if let Some(names) = first.as_array() {
+                                    for name in names {
+                                        if let Some(s) = name.as_str() {
+                                            models.push(serde_json::json!({ "name": s }));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Deduplicate
+    let mut seen = std::collections::HashSet::new();
+    models.retain(|m| seen.insert(m["name"].as_str().unwrap_or("").to_string()));
+    Ok(models)
+}
+
+fn find_comfyui() -> Option<std::path::PathBuf> {
+    // Common install locations, ordered by priority
+    let candidates: Vec<std::path::PathBuf> = vec![
+        flowith_home().join("ComfyUI"),                          // Flowith managed install
+        dirs_next::home_dir()?.join("ComfyUI"),                  // ~/ComfyUI
+        dirs_next::home_dir()?.join("Documents").join("ComfyUI"),// ~/Documents/ComfyUI
+        dirs_next::home_dir()?.join("comfyui"),                  // lowercase variant
+        Path::new("/Applications/ComfyUI").to_path_buf(),        // System Applications
+    ];
+    for dir in &candidates {
+        if dir.join("main.py").exists() {
+            eprintln!("[ComfyUI] Found at {}", dir.display());
+            return Some(dir.clone());
+        }
+    }
+    // Also try `which comfyui` or pip-installed
+    if let Ok(output) = Command::new("python3")
+        .args(["-c", "import comfy; print(comfy.__file__)"])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                let dir = Path::new(&path).parent().map(|p| p.to_path_buf());
+                if let Some(d) = dir {
+                    eprintln!("[ComfyUI] Found pip install at {}", d.display());
+                    return Some(d);
+                }
+            }
+        }
+    }
+    eprintln!("[ComfyUI] Not found in any standard location.");
+    None
+}
+
+fn auto_start_comfyui(app: &AppHandle) {
+    let comfy_dir = match find_comfyui() {
+        Some(dir) => dir,
+        None => {
+            eprintln!("[ComfyUI] Run Setup or install manually to ~/ComfyUI");
+            return;
+        }
+    };
+    eprintln!("[ComfyUI] Launching from {}, starting...", comfy_dir.display());
+    match start_comfyui_at(app.clone(), &comfy_dir) {
+        Ok(msg) => eprintln!("[ComfyUI] {}", msg),
+        Err(e) => eprintln!("[ComfyUI] Start failed: {}", e),
+    }
+}
+
 #[tauri::command]
 fn validate_comfyui_path(path: String) -> Result<serde_json::Value, String> {
     let main_py = Path::new(&path).join("main.py");
@@ -783,9 +1161,11 @@ pub fn run() {
             read_settings, write_settings,
             read_text_file, write_text_file, write_output_file,
             cloud_llm_call, comfyui_generate,
+            test_comfyui_connection, get_comfyui_models,
             // Launcher commands
             detect_system, install_ollama, pull_model,
             install_python, install_git, install_comfyui,
+            start_comfyui, stop_comfyui,
             finish_launcher, relaunch_launcher, validate_comfyui_path,
             // Knowledge Base commands
             kb::kb_add_document, kb::kb_search, kb::kb_get_documents,
@@ -806,6 +1186,7 @@ pub fn run() {
                 }
             }
             python_service::auto_start(app.handle());
+            auto_start_comfyui(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

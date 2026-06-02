@@ -3,13 +3,15 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useT, useLanguage } from "@/i18n";
 import { selectProjectFolder, hasFolderAccess } from "@/services/fileStorage";
 
-const DEMO_KEYS = ["demo1", "demo2", "demo3", "demo4", "demo5"] as const;
+const DEMO_KEYS = ["demo1", "demo2", "demo3", "demo4", "demo5", "demo6", "demo7"] as const;
 const LOADERS = {
   demo1: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoProject,
   demo2: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoCustomerService,
   demo3: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoCodeReview,
   demo4: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoMarketing,
   demo5: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoDataAnalysis,
+  demo6: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoInfluencerContent,
+  demo7: (s: ReturnType<typeof useProjectStore.getState>) => s.loadDemoComfyUI,
 };
 
 export default function WelcomeModal() {
@@ -24,22 +26,12 @@ export default function WelcomeModal() {
   const t = useT();
   const { lang, setLanguage } = useLanguage();
 
-  // Auto-bootstrap on first launch: detect Ollama models and load all 5 demos.
-  // Skip if user explicitly hit Reset (sessionStorage flag prevents auto-load so cover stays).
+  // Skip auto-bootstrap on first launch to prevent Ollama fetch from hanging the UI.
+  // User can load demos manually from the WelcomeModal buttons.
   useEffect(() => {
-    if (sessionStorage.getItem("boss_skip_auto_bootstrap")) {
-      sessionStorage.removeItem("boss_skip_auto_bootstrap");
-      return;
-    }
-    let cancelled = false;
-    const bootstrap = async () => {
-      setBootstrapping(true);
-      await bootstrapDemos(lang);
-      if (!cancelled) setBootstrapping(false);
-    };
-    const timer = setTimeout(bootstrap, 200); // brief delay for UI to render
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [lang, bootstrapDemos]);
+    sessionStorage.removeItem("boss_skip_auto_bootstrap");
+    setBootstrapping(false);
+  }, []);
 
   const handlePickFolder = async () => {
     setPicking(true);

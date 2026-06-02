@@ -86,30 +86,75 @@ export async function executeWorkflow(
 
   // Build lookup
   const nodeMap = new Map(nodes.map((n) => [n.nodeId, n]));
+
+  // Build adjacency: downstream (children) and upstream (parents)
+  const downstreamMap = new Map<string, string[]>();
   const upstreamMap = new Map<string, string[]>();
-  for (const n of nodes) upstreamMap.set(n.nodeId, []);
+  for (const n of nodes) {
+    downstreamMap.set(n.nodeId, []);
+    upstreamMap.set(n.nodeId, []);
+  }
   for (const e of edges) {
+    downstreamMap.get(e.sourceNodeId)?.push(e.targetNodeId);
     upstreamMap.get(e.targetNodeId)?.push(e.sourceNodeId);
   }
 
-  // Topological order
-  const order = topologicalSort(nodes, edges);
+  // Topological order for back-edge detection
+  const topoOrder = topologicalSort(nodes, edges);
+  const topoIndex = new Map(topoOrder.map((id, i) => [id, i]));
 
-  // Collect upstream outputs for each node
+  // Execution state
   const outputs = new Map<string, string>();
-
-  // Clone nodes to avoid mutating store directly (caller will apply)
   const updatedNodes = nodes.map((n) => ({ ...n }));
+  const pendingInDegree = new Map<string, number>();
+  const iterationCounts = new Map<string, number>();
+  const MAX_ITERATIONS_PER_NODE = 20;
+  const MAX_TOTAL_STEPS = 100;
 
-  for (const nodeId of order) {
-    if (signal?.aborted) break;
+  // Initialize pending in-degree
+  // Decision nodes: 0 pending (trigger on any upstream input)
+  for (const n of nodes) {
+    const ups = upstreamMap.get(n.nodeId) ?? [];
+    pendingInDegree.set(n.nodeId, n.type === "decision" ? 0 : ups.length);
+  }
+
+  // Queue: nodes ready to execute
+  const queue: string[] = [];
+  for (const n of nodes) {
+    if ((pendingInDegree.get(n.nodeId) ?? 0) === 0) {
+      queue.push(n.nodeId);
+    }
+  }
+  queue.sort((a, b) => (topoIndex.get(a) ?? 0) - (topoIndex.get(b) ?? 0));
+
+  let totalSteps = 0;
+
+  while (queue.length > 0 && !signal?.aborted && totalSteps < MAX_TOTAL_STEPS) {
+    totalSteps++;
+    const nodeId = queue.shift()!;
 
     const node = nodeMap.get(nodeId);
     if (!node) continue;
 
+    // Track iterations per node to prevent infinite loops
+    const iter = (iterationCounts.get(nodeId) ?? 0) + 1;
+    iterationCounts.set(nodeId, iter);
+    if (iter > MAX_ITERATIONS_PER_NODE) {
+      logger.warn("execution", `Node ${nodeId.slice(0, 8)} exceeded max iterations (${MAX_ITERATIONS_PER_NODE}), halting loop`);
+      const existingOutput = outputs.get(nodeId);
+      if (existingOutput) {
+        const idx = updatedNodes.findIndex((n) => n.nodeId === nodeId);
+        if (idx !== -1) {
+          updatedNodes[idx].status = "completed";
+          updatedNodes[idx].outputCache = existingOutput + "\n\n[Max iterations reached — loop halted]";
+        }
+      }
+      continue;
+    }
+
     onProgress({ nodeId, status: "running" });
     startNodeTimer(nodeId);
-    logger.debug("execution", `Node started: ${nodeId.slice(0, 8)} (${node.type})`);
+    logger.debug("execution", `Node started: ${nodeId.slice(0, 8)} (${node.type}) iter=${iter}`);
 
     // Gather upstream outputs
     const upstreamIds = upstreamMap.get(nodeId) ?? [];
@@ -117,6 +162,13 @@ export async function executeWorkflow(
     for (const uid of upstreamIds) {
       const out = outputs.get(uid);
       if (out !== undefined) upstreamOutputs[uid] = out;
+    }
+
+    // For Decision nodes: skip if no upstream has produced output yet
+    if (node.type === "decision" && Object.keys(upstreamOutputs).length === 0) {
+      logger.debug("execution", `Decision node ${nodeId.slice(0, 8)} has no upstream outputs yet, waiting`);
+      iterationCounts.set(nodeId, iter - 1);
+      continue;
     }
 
     // Compute input hash
@@ -154,15 +206,16 @@ export async function executeWorkflow(
     });
     const newHash = await sha256(hashInput);
 
-    // Check cache
-    if (node.executionHash === newHash && node.outputCache !== null && node.status === "completed") {
+    // Check cache — only for first execution (iter === 1)
+    if (iter === 1 && node.executionHash === newHash && node.outputCache !== null && node.status === "completed") {
       outputs.set(nodeId, node.outputCache);
-      // Mark as cached for visual indicator
       const cIdx = updatedNodes.findIndex((n) => n.nodeId === nodeId);
       if (cIdx !== -1) updatedNodes[cIdx].wasCached = true;
       metrics.recordCacheHit(nodeId);
       logger.info("cache", `Cache hit: ${nodeId.slice(0, 8)}`, { nodeId, nodeType: node.type });
       onProgress({ nodeId, status: "completed", output: node.outputCache, cached: true });
+      // Notify downstream nodes
+      notifyDownstream(node, updatedNodes, outputs, downstreamMap, pendingInDegree, topoIndex, queue);
       continue;
     }
 
@@ -199,6 +252,14 @@ export async function executeWorkflow(
 
         // Recursively reset downstream nodes
         invalidateDownstream(nodeId, updatedNodes, edges);
+
+        // Notify downstream nodes (add ready nodes to queue)
+        notifyDownstream(node, updatedNodes, outputs, downstreamMap, pendingInDegree, topoIndex, queue);
+
+        // Handle Decision "no" → loop-back to upstream nodes
+        if (node.type === "decision" && result.trim().toLowerCase() === "no") {
+          handleLoopBack(nodeId, downstreamMap, topoIndex, updatedNodes, outputs, iterationCounts, queue, edges);
+        }
       } catch (execErr: any) {
         clearTimeout(timeoutTimer);
 
@@ -236,7 +297,112 @@ export async function executeWorkflow(
       }
   }
 
+  if (totalSteps >= MAX_TOTAL_STEPS) {
+    logger.warn("execution", `Workflow halted: exceeded max steps (${MAX_TOTAL_STEPS})`);
+  }
+
   return updatedNodes;
+}
+
+// ─── Downstream Notification ─────────────────────────────────────
+
+function notifyDownstream(
+  node: TaskNode,
+  updatedNodes: TaskNode[],
+  outputs: Map<string, string>,
+  downstreamMap: Map<string, string[]>,
+  pendingInDegree: Map<string, number>,
+  topoIndex: Map<string, number>,
+  queue: string[],
+) {
+  for (const childId of downstreamMap.get(node.nodeId) ?? []) {
+    const childNode = updatedNodes.find((n) => n.nodeId === childId);
+    if (!childNode) continue;
+
+    if (childNode.type === "decision") {
+      if (!queue.includes(childId)) {
+        queue.push(childId);
+        queue.sort((a, b) => (topoIndex.get(a) ?? 0) - (topoIndex.get(b) ?? 0));
+      }
+    } else {
+      const newDeg = (pendingInDegree.get(childId) ?? 1) - 1;
+      pendingInDegree.set(childId, Math.max(0, newDeg));
+      if (newDeg <= 0 && !queue.includes(childId)) {
+        queue.push(childId);
+        queue.sort((a, b) => (topoIndex.get(a) ?? 0) - (topoIndex.get(b) ?? 0));
+      }
+    }
+  }
+}
+
+// ─── Loop-Back Handling ──────────────────────────────────────────
+
+function handleLoopBack(
+  decisionNodeId: string,
+  downstreamMap: Map<string, string[]>,
+  topoIndex: Map<string, number>,
+  updatedNodes: TaskNode[],
+  outputs: Map<string, string>,
+  iterationCounts: Map<string, number>,
+  queue: string[],
+  edges: WorkflowEdge[],
+) {
+  const decisionTopoIdx = topoIndex.get(decisionNodeId) ?? -1;
+
+  for (const childId of downstreamMap.get(decisionNodeId) ?? []) {
+    const childTopoIdx = topoIndex.get(childId) ?? Infinity;
+
+    if (childTopoIdx < decisionTopoIdx) {
+      logger.info("execution", `Loop-back detected: Decision ${decisionNodeId.slice(0, 8)} → ${childId.slice(0, 8)} (re-iterating)`);
+
+      const targetNode = updatedNodes.find((n) => n.nodeId === childId);
+      if (targetNode) {
+        targetNode.status = "pending";
+        targetNode.outputCache = null;
+        targetNode.executionHash = null;
+        targetNode.wasCached = undefined;
+      }
+      outputs.delete(childId);
+      resetPathToDecision(childId, decisionNodeId, updatedNodes, downstreamMap, outputs);
+
+      if (!queue.includes(childId)) {
+        queue.push(childId);
+      }
+    }
+  }
+}
+
+function resetPathToDecision(
+  startNodeId: string,
+  decisionNodeId: string,
+  updatedNodes: TaskNode[],
+  downstreamMap: Map<string, string[]>,
+  outputs: Map<string, string>,
+) {
+  const toReset = new Set<string>();
+  const visitQueue = [startNodeId];
+
+  while (visitQueue.length > 0) {
+    const current = visitQueue.shift()!;
+    if (current === decisionNodeId || toReset.has(current)) continue;
+    toReset.add(current);
+    for (const child of downstreamMap.get(current) ?? []) {
+      if (child !== decisionNodeId && !toReset.has(child)) {
+        visitQueue.push(child);
+      }
+    }
+  }
+
+  for (const nid of toReset) {
+    const node = updatedNodes.find((n) => n.nodeId === nid);
+    if (node && node.status === "completed") {
+      node.status = "pending";
+      node.outputCache = null;
+      node.executionHash = null;
+      node.wasCached = undefined;
+    }
+    outputs.delete(nid);
+  }
 }
 
 // ─── Per-Node Execution ──────────────────────────────────────────
@@ -251,9 +417,9 @@ async function executeNode(
   switch (node.type) {
     case "input": {
       const src = node.inputSource ?? "text";
-      if (src === "file" && node.inputContent) {
-        // File content is stored as base64 data URL — return filename + preview
-        return `[File: ${node.inputPath ?? "unknown"}]\n${node.inputContent.slice(0, 500)}${node.inputContent.length > 500 ? "..." : ""}`;
+      if ((src === "file" || src === "folder") && node.inputContent) {
+        const label = src === "folder" ? "Folder" : "File";
+        return `[${label}: ${node.inputPath ?? "unknown"}]\n${node.inputContent.slice(0, 2000)}${node.inputContent.length > 2000 ? "\n...(truncated)" : ""}`;
       }
       if (src === "url" && node.inputPath) {
         try {
@@ -358,7 +524,15 @@ async function executeNode(
 
       // Single agent
       const primaryAgent = agents[0];
-      return await llmService.call(primaryAgent, taskPrompt, signal, nodeId);
+      const comfyParams = primaryAgent.provider === "comfyui"
+        ? (node.data?.comfyuiParams as import("./llmService").ComfyUIParams | undefined)
+        : undefined;
+
+      // For ComfyUI, use upstream context directly as the image prompt
+      const comfyPrompt = primaryAgent.provider === "comfyui" && context
+        ? context
+        : taskPrompt;
+      return await llmService.call(primaryAgent, comfyPrompt, signal, nodeId, comfyParams);
     }
 
     default:

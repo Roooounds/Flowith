@@ -13,10 +13,25 @@ export function useComfyUIModels() {
     setLoading(true);
     try {
       const cfg = getLLMConfig();
-      const url = (cfg.comfyuiBaseUrl || "http://localhost:8188").replace(/\/$/, "");
+      const baseUrl = (cfg.comfyuiBaseUrl || "http://localhost:8188").replace(/\/$/, "");
+
+      // Go through Rust backend to avoid CORS / webview fetch issues
+      const { invoke } = await import("@tauri-apps/api/core");
+      // First try: use Rust backend command
+      try {
+        const models = await invoke<{ name: string }[]>("get_comfyui_models", { baseUrl });
+        if (models.length > 0) {
+          setModels(models.map((m) => ({ name: m.name, type: "checkpoint" })));
+          return;
+        }
+      } catch {
+        // Fall through to direct fetch
+      }
+
+      // Fallback: direct fetch
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`${url}/object_info`, { signal: controller.signal });
+      const t = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${baseUrl}/object_info`, { signal: controller.signal });
       clearTimeout(t);
       const data = await res.json();
       const found: ComfyModel[] = [];

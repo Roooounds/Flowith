@@ -14,7 +14,7 @@ export type ProviderType = "local_ollama" | "cloud_openai" | "cloud_anthropic" |
 export type NodeType = "task" | "input" | "logic" | "decision" | "switch" | "loop" | "output";
 
 export type CollaborationMode = "sequential" | "parallel" | "debate" | "critique";
-export type InputSource = "text" | "file" | "url";
+export type InputSource = "text" | "file" | "url" | "folder";
 export type OutputFormat = "text" | "markdown" | "csv" | "code" | "image" | "auto";
 
 export type ToolPermission =
@@ -94,6 +94,10 @@ export interface WorkflowEdge {
   targetNodeId: string;
   /** Optional label describing the data passed along this edge */
   label?: string;
+  /** Handle ID for the source side (used for multi-output nodes like Switch) */
+  sourceHandle?: string;
+  /** Handle ID for the target side */
+  targetHandle?: string;
 }
 
 // ─── Workflow ────────────────────────────────────────────────────

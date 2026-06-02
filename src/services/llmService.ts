@@ -335,13 +335,30 @@ async function callCustomModel(
 
 // ─── ComfyUI (via Rust backend) ───────────────────────────────────
 
-async function callComfyUI(agent: AgentProfile, prompt: string): Promise<string> {
+export interface ComfyUIParams {
+  width?: number;
+  height?: number;
+  steps?: number;
+  cfg_scale?: number;
+  seed?: number;
+  negative_prompt?: string;
+  workflowJson?: string;  // Full ComfyUI workflow JSON (editor or API format)
+}
+
+async function callComfyUI(agent: AgentProfile, prompt: string, comfyParams?: ComfyUIParams): Promise<string> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<string>("comfyui_generate", {
       baseUrl: config.comfyuiBaseUrl,
       model: agent.modelName,
       prompt,
+      width: comfyParams?.width ?? null,
+      height: comfyParams?.height ?? null,
+      steps: comfyParams?.steps ?? null,
+      cfgScale: comfyParams?.cfg_scale ?? null,
+      seed: comfyParams?.seed != null && comfyParams.seed >= 0 ? comfyParams.seed : null,
+      negativePrompt: comfyParams?.negative_prompt ?? null,
+      workflowJson: comfyParams?.workflowJson ?? null,
     });
   } catch (err: any) {
     const msg = err?.message ?? String(err);
@@ -366,6 +383,7 @@ export const llmService = {
     prompt: string,
     signal?: AbortSignal,
     nodeId?: string,
+    comfyParams?: ComfyUIParams,
   ): Promise<string> {
     if (nodeId) {
       const { metrics, logger } = await import("./loggerService");
@@ -391,7 +409,7 @@ export const llmService = {
       case "cloud_custom":
         return callCustomModel(agent, prompt, signal);
       case "comfyui":
-        return callComfyUI(agent, prompt);
+        return callComfyUI(agent, prompt, comfyParams);
       default:
         throw new Error(`Unknown provider: ${agent.provider}`);
     }

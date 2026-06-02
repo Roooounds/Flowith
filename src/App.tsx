@@ -36,6 +36,7 @@ function ProgressBar() {
 function RunButton() {
   const isRunning = useProjectStore((s) => s.isRunning);
   const runWorkflow = useProjectStore((s) => s.runWorkflow);
+  const stopWorkflow = useProjectStore((s) => s.stopWorkflow);
   const project = useProjectStore((s) => s.project);
   const t = useT();
 
@@ -43,21 +44,20 @@ function RunButton() {
 
   return (
     <button
-      onClick={runWorkflow}
-      disabled={isRunning || nodeCount === 0}
+      onClick={isRunning ? stopWorkflow : runWorkflow}
+      disabled={nodeCount === 0}
       className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
         isRunning
-          ? "bg-boss-accent/10 text-boss-accent animate-pulse cursor-wait"
+          ? "bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30"
           : "bg-boss-accent hover:bg-boss-accent-hover text-white"
       } disabled:opacity-30 disabled:cursor-not-allowed`}
     >
       {isRunning ? (
         <span className="flex items-center gap-1.5">
-          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
           </svg>
-          {t.app.runningWorkflow}
+          {t.app.stopWorkflow}
         </span>
       ) : (
         <span className="flex items-center gap-1.5">

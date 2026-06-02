@@ -27,6 +27,9 @@ function pickModel(cat: string, fallback: string, models?: { name: string }[]): 
 
 type RightPanel = "properties" | "agents" | "kb" | null;
 
+// ─── Abort controller for workflow execution ───
+let _runAbortController: AbortController | null = null;
+
 interface WorkflowSnapshot {
   nodes: TaskNode[];
   edges: WorkflowEdge[];
@@ -54,6 +57,8 @@ interface ProjectStore {
   loadDemoCodeReview: (lang: "en" | "zh") => void;
   loadDemoMarketing: (lang: "en" | "zh") => void;
   loadDemoDataAnalysis: (lang: "en" | "zh") => void;
+  loadDemoInfluencerContent: (lang: "en" | "zh") => void;
+  loadDemoComfyUI: (lang: "en" | "zh") => void;
   loadAllDemos: (lang: "en" | "zh", models?: { name: string }[]) => void;
   bootstrapDemos: (lang: "en" | "zh") => Promise<void>;
   switchProject: (projectId: string) => void;
@@ -87,6 +92,7 @@ interface ProjectStore {
   runProgress: { completed: number; total: number };
   runWorkflow: () => Promise<void>;
   runWorkflowFromNode: (nodeId: string) => Promise<void>;
+  stopWorkflow: () => void;
 
   // Agent editing trigger
   editingAgentId: string | null;
@@ -158,14 +164,16 @@ function buildCanvasFromProject(p: Project | null) {
     return taskNodeToBossNode(n, names, avatars);
   });
   const canvasEdges: BossEdge[] = p.workflow.edges.map((e) => {
-    const sourceNode = p.workflow.nodes.find((n) => n.nodeId === e.sourceNodeId);
-    const isDecisionSource = sourceNode?.type === "decision";
-    const sourceHandle =
-      isDecisionSource && e.label === "Yes" ? "yes"
-      : isDecisionSource && e.label === "是" ? "yes"
-      : isDecisionSource && e.label === "No" ? "no"
-      : isDecisionSource && e.label === "否" ? "no"
-      : undefined;
+    // Use explicit sourceHandle from edge data if available,
+    // otherwise derive from Decision node labels for backward compatibility
+    let sourceHandle = e.sourceHandle;
+    if (!sourceHandle) {
+      const sourceNode = p.workflow.nodes.find((n) => n.nodeId === e.sourceNodeId);
+      if (sourceNode?.type === "decision") {
+        if (e.label === "Yes" || e.label === "是") sourceHandle = "yes";
+        else if (e.label === "No" || e.label === "否") sourceHandle = "no";
+      }
+    }
     return {
       id: e.edgeId, source: e.sourceNodeId, target: e.targetNodeId, sourceHandle,
       type: "smoothstep" as const, animated: false,
@@ -598,6 +606,112 @@ function buildDataAnalysisDemo(lang: "en" | "zh", models?: { name: string }[]) {
   return { project, canvasNodes, canvasEdges };
 }
 
+function buildInfluencerContentDemo(lang: "en" | "zh", models?: { name: string }[]) {
+  const projectId = uuidv4();
+  const now = new Date().toISOString();
+  const isZh = lang === "zh";
+  const pick = (cat: string, fb: string) => pickModel(cat, fb, models);
+  const agents: AgentProfile[] = [
+    { agentId: uuidv4(), name: isZh ? "卖点提炼师" : "Hook Extractor", avatarEmoji: "🔍", category: "创作", provider: "local_ollama", modelName: pick("创作", "deepseek-r1:8b"), systemPrompt: pp("卖点提炼师", "You are a viral content analyst. Extract the most compelling hooks, emotional pain points, and unique angles from raw material. Output: 1) Top 3 emotional hooks 2) 5 key pain points 3) 3 unique angles. Be specific and concrete, not generic."), temperature: 0.5, toolsAllowed: [], createdAt: now, updatedAt: now },
+    { agentId: uuidv4(), name: isZh ? "策略分析师" : "Strategy Analyst", avatarEmoji: "🧠", category: "分析", provider: "local_ollama", modelName: pick("分析", "qwen2.5:14b"), systemPrompt: pp("策略分析师", "你是一位内容策略分析师。输入卖点提炼的输出，你需要：1) 提炼一句能打透情绪的核心Slogan（不超过20字） 2) 总结3条内容策略方向 3) 判断目标受众画像。输出要精炼，不要废话，每条不超过一行。" ), temperature: 0.4, toolsAllowed: [], createdAt: now, updatedAt: now },
+    { agentId: uuidv4(), name: isZh ? "黄金三秒审查官" : "Hook Judge", avatarEmoji: "⚡", category: "创作", provider: "local_ollama", modelName: pick("创作", "qwen2.5:7b"), systemPrompt: pp("黄金三秒审查官", "You evaluate whether a content hook is compelling enough to stop a user from scrolling. Criteria: 1) Emotional trigger (surprise/anger/curiosity/empathy) 2) Specific and concrete (not vague) 3) Creates an information gap. If ALL THREE criteria are met, reply 'yes'. Otherwise reply 'no' and explain which criterion failed."), temperature: 0.1, toolsAllowed: [], createdAt: now, updatedAt: now },
+    { agentId: uuidv4(), name: isZh ? "小红书爆款写手" : "Xiaohongshu Writer", avatarEmoji: "🍠", category: "创作", provider: "cloud_anthropic", modelName: pick("创作", "claude-sonnet-4-20250514"), systemPrompt: pp("小红书爆款写手", "你是拥有10万粉丝的小红书生活方式博主。风格：网感强、有记忆点、多用Emoji、短句排版、空行呼吸。输出格式：标题（带情绪钩子）+ 正文（3-4段，每段不超过3行）+ 结尾标签（3-5个热门话题）。拒绝AI味，像闺蜜在分享。" ), temperature: 0.8, toolsAllowed: ["web_search"], createdAt: now, updatedAt: now },
+    { agentId: uuidv4(), name: isZh ? "A/B测试优化师" : "A/B Test Optimizer", avatarEmoji: "🔄", category: "创作", provider: "local_ollama", modelName: pick("创作", "qwen2.5:7b"), systemPrompt: pp("A/B测试优化师", "你是一位标题A/B测试专家。每次给你一个当前标题和策略方向，你需要生成3个改进版本。要求：1) 每个版本有不同的情绪钩子角度（好奇/痛点/反常识/紧迫感） 2) 标注每个版本的核心策略 3) 选出最佳版本并说明理由。输出格式：每行一个版本，用【策略类型】标注。" ), temperature: 0.7, toolsAllowed: [], createdAt: now, updatedAt: now },
+    { agentId: uuidv4(), name: isZh ? "短视频爆款编导" : "Short Video Director", avatarEmoji: "🎬", category: "创作", provider: "cloud_openai", modelName: pick("创作", "gpt-4o"), systemPrompt: pp("短视频爆款编导", "你是抖音/视频号百万粉丝编导。输出口播脚本+分镜提示词。格式：表格，左列[视觉画面]（分镜描述，可用于AI生图/生视频的提示词），右列[口播台词]（自然口语，不念稿）。黄金三秒必须有画面冲击+悬念台词。总长度60秒以内。" ), temperature: 0.7, toolsAllowed: ["web_search"], createdAt: now, updatedAt: now },
+  ];
+  const n1 = uuidv4(), n2 = uuidv4(), n3 = uuidv4(), n4 = uuidv4(), n5 = uuidv4(), n6 = uuidv4(), n7 = uuidv4(), n8 = uuidv4(), n9 = uuidv4();
+  const nodes: TaskNode[] = [
+    { nodeId: n1, type: "input", agentIds: [], inputSource: "text", inputContent: isZh ? "为什么上班族副业那么难？时间碎片化是最大杀手。三个白领在讨论工资不够花，一个说想做自媒体但不知道拍什么。她们的问题不是没想法，是想法太多太乱。八小时外的时间是唯一完全属于自己的生产资料。如何把碎片灵感变成稳定产出？需要一套系统，不是靠意志力。" : "Why is side-hustling so hard for office workers? Fragmented time is the biggest killer. Three professionals discussing side income. One wants to start content creation but doesn't know what to make. The problem isn't lack of ideas — it's too many scattered ideas. Time after 6pm is the only means of production you truly own. How to turn scattered inspiration into consistent output? You need a system, not willpower.", instruction: isZh ? "📁 灵感碎片 — 通勤、咖啡馆、深夜随手记的杂乱文本" : "📁 Inspiration scraps — messy notes from commutes, cafes, late nights", status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 40 }, data: {} },
+    { nodeId: n2, type: "task", agentIds: [agents[0].agentId], instruction: isZh ? "清洗提炼：从杂乱灵感中提取情绪钩子、核心痛点和内容角度" : "Extract emotional hooks, core pain points, and content angles from raw material", status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 200 }, data: {} },
+    { nodeId: n3, type: "logic", agentIds: [agents[1].agentId], instruction: isZh ? "策略总结：提炼核心Slogan+3条内容策略+目标受众画像" : "Strategy summary: extract core slogan + 3 content strategies + target audience profile", status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 370 }, data: {} },
+    { nodeId: n4, type: "decision", agentIds: [agents[2].agentId], instruction: isZh ? "审核：Slogan和钩子满足黄金三秒三要素？(情绪触发 / 具体而非泛泛 / 制造信息缺口)" : "Gate: Does the slogan+hook meet 3-sec criteria? (emotional trigger / specific & concrete / info gap)", status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 540 }, data: {} },
+    { nodeId: n5, type: "switch", agentIds: [], instruction: isZh ? "多平台分发：按内容形态路由到不同创作分支" : "Multi-platform dispatch: route by content format to different creator branches", switchBranches: [isZh ? "小红书图文" : "Xiaohongshu", isZh ? "抖音短视频" : "TikTok"], status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 710 }, data: {} },
+    { nodeId: n6, type: "task", agentIds: [agents[3].agentId], instruction: isZh ? "生成小红书爆款图文：标题+正文+话题标签，网感强、有记忆点" : "Create viral Xiaohongshu post: headline + body + hashtags, strong internet-native vibe", status: "pending", outputCache: null, executionHash: null, position: { x: 120, y: 890 }, data: {} },
+    { nodeId: n7, type: "loop", agentIds: [agents[4].agentId], instruction: isZh ? "A/B测试：对标题进行最多3轮迭代优化，每轮生成3个改进版本并选出最佳" : "A/B test: iterate title up to 3 rounds, generating 3 improved versions each round and selecting the best", loopConfig: { maxIterations: 3, condition: isZh ? "标题优化轮次 < 3" : "title iteration round < 3" }, status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 890 }, data: {} },
+    { nodeId: n8, type: "task", agentIds: [agents[5].agentId], instruction: isZh ? "生成短视频口播脚本+分镜：左视觉画面右口播台词，黄金三秒+60秒节奏" : "Create short video script + shot prompts: visual left / voiceover right table, 3-sec hook + 60-sec pacing", status: "pending", outputCache: null, executionHash: null, position: { x: 780, y: 890 }, data: {} },
+    { nodeId: n9, type: "output", agentIds: [], instruction: isZh ? "📦 发布内容汇总 — 所有通过审核的跨平台内容最终汇总输出" : "📦 Publishing digest — final compiled output of all approved cross-platform content", status: "pending", outputCache: null, executionHash: null, position: { x: 450, y: 1080 }, data: {} },
+  ];
+  const edges: WorkflowEdge[] = [
+    { edgeId: uuidv4(), sourceNodeId: n1, targetNodeId: n2 },
+    { edgeId: uuidv4(), sourceNodeId: n2, targetNodeId: n3 },
+    { edgeId: uuidv4(), sourceNodeId: n3, targetNodeId: n4 },
+    { edgeId: uuidv4(), sourceNodeId: n4, targetNodeId: n5, label: isZh ? "通过" : "Pass" },
+    { edgeId: uuidv4(), sourceNodeId: n4, targetNodeId: n7, label: isZh ? "不通过" : "Fail" },
+    { edgeId: uuidv4(), sourceNodeId: n5, targetNodeId: n6, label: isZh ? "小红书图文" : "Xiaohongshu", sourceHandle: isZh ? "小红书图文" : "Xiaohongshu" },
+    { edgeId: uuidv4(), sourceNodeId: n5, targetNodeId: n8, label: isZh ? "抖音短视频" : "TikTok", sourceHandle: isZh ? "抖音短视频" : "TikTok" },
+    { edgeId: uuidv4(), sourceNodeId: n6, targetNodeId: n9 },
+    { edgeId: uuidv4(), sourceNodeId: n7, targetNodeId: n9 },
+    { edgeId: uuidv4(), sourceNodeId: n8, targetNodeId: n9 },
+  ];
+  const project: Project = {
+    projectId, name: isZh ? "📱 八小时外主理人" : "📱 After-Hours Creator",
+    description: isZh ? "全卡片类型演示：Input → Task提炼 → Logic总结 → Decision审核 → Switch分发 → Loop优化 → Output汇总" : "All card types demo: Input → Task extraction → Logic summary → Decision gate → Switch dispatch → Loop optimization → Output",
+    goal: isZh ? "建立一套碎片灵感到多平台内容产出的自动化管线。" : "Build an automated pipeline from scattered inspiration to multi-platform content output.",
+    knowledgeBaseId: null, workflow: { nodes, edges }, agents, vaultAgents: [], permanentlyDeletedPresetNames: [],
+    createdAt: now, updatedAt: now,
+  };
+  const { canvasNodes, canvasEdges } = buildCanvasFromProject(project);
+  return { project, canvasNodes, canvasEdges };
+}
+
+function buildComfyUIDemo(lang: "en" | "zh", models?: { name: string }[]) {
+  const projectId = uuidv4();
+  const now = new Date().toISOString();
+  const isZh = lang === "zh";
+  const pick = (cat: string, fb: string) => pickModel(cat, fb, models);
+
+  const agents: AgentProfile[] = [
+    {
+      agentId: uuidv4(), name: isZh ? "🎨 ComfyUI 图像生成" : "🎨 ComfyUI Image Gen",
+      avatarEmoji: "🎨", category: "创作",
+      provider: "comfyui",
+      modelName: pick("comfyui", "sd_xl_base_1.0.safetensors"),
+      systemPrompt: pp("ComfyUI 图像生成", "You are a professional AI image generator. Generate high-quality images from text prompts. Style: cinematic lighting, rich details, professional composition."),
+      temperature: 1.0, toolsAllowed: ["comfyui_render"] as any,
+      createdAt: now, updatedAt: now,
+    },
+  ];
+
+  const n1 = uuidv4(), n2 = uuidv4(), n3 = uuidv4();
+  const nodes: TaskNode[] = [
+    {
+      nodeId: n1, type: "input", agentIds: [], inputSource: "text",
+      inputContent: isZh
+        ? "一座漂浮在云端的未来主义空中花园，霓虹灯光的植物在黄昏时分发光，半透明的玻璃建筑倒映着晚霞，画面富有电影级的光影和精致的细节氛围"
+        : "A futuristic floating garden city above the clouds at golden hour, neon-bioluminescent plants glowing, translucent glass architecture reflecting the sunset sky, cinematic lighting, hyper-detailed, 8K",
+      instruction: isZh ? "📝 画面描述 — ComfyUI 生图的 Prompt 输入" : "📝 Image prompt — text description for ComfyUI generation",
+      status: "pending", outputCache: null, executionHash: null, position: { x: 300, y: 60 }, data: {},
+    },
+    {
+      nodeId: n2, type: "task", agentIds: [agents[0].agentId],
+      instruction: isZh ? "根据输入的 Prompt 生成图像" : "Generate image from input prompt",
+      status: "pending", outputCache: null, executionHash: null, position: { x: 300, y: 260 },
+      data: { comfyuiParams: { width: 384, height: 384, steps: 10, cfg_scale: 5, seed: -1, negative_prompt: "bad quality, blurry, distorted" } },
+    },
+    {
+      nodeId: n3, type: "output", agentIds: [],
+      instruction: isZh ? "🖼️ 生成的图像 — ComfyUI 渲染结果" : "🖼️ Generated image — ComfyUI render result",
+      status: "pending", outputCache: null, executionHash: null, position: { x: 300, y: 460 }, data: {},
+    },
+  ];
+
+  const edges: WorkflowEdge[] = [
+    { edgeId: uuidv4(), sourceNodeId: n1, targetNodeId: n2 },
+    { edgeId: uuidv4(), sourceNodeId: n2, targetNodeId: n3 },
+  ];
+
+  const project: Project = {
+    projectId, name: isZh ? "🎨 ComfyUI 图像生成" : "🎨 ComfyUI Image Generation",
+    description: isZh ? "本地 AI 图像生成演示：Input 输入 Prompt → ComfyUI Task 渲染 → Output 展示结果" : "Local AI image generation demo: Input prompt → ComfyUI Task render → Output display",
+    goal: isZh ? "通过 ComfyUI 本地运行 SD 模型生成高质量图像。" : "Generate high-quality images via ComfyUI running locally with SD models.",
+    knowledgeBaseId: null, workflow: { nodes, edges }, agents, vaultAgents: [], permanentlyDeletedPresetNames: [],
+    createdAt: now, updatedAt: now,
+  };
+
+  const { canvasNodes, canvasEdges } = buildCanvasFromProject(project);
+  return { project, canvasNodes, canvasEdges };
+}
+
 // ─── Store ────────────────────────────────────────────────────────
 
 // Helper: clean up migrated data (remove goal nodes, fill defaults)
@@ -615,12 +729,28 @@ function sanitizeProjects(projects: Project[]) {
   }
 }
 
+// ── Force-clear stale localStorage data (one-time fix for corrupt data from previous sessions) ──
+// This runs BEFORE loadProjectsFallback to prevent crashes from incompatible data formats.
+// Remove after next release when all users have clean data.
+const FORCE_CLEAR_FLAG = "flowith_data_cleared_v1";
+if (!localStorage.getItem(FORCE_CLEAR_FLAG)) {
+  try { localStorage.removeItem("flowith_projects"); } catch {}
+  try { localStorage.setItem(FORCE_CLEAR_FLAG, "1"); } catch {}
+}
+
 // Sync load from localStorage (blocking — needed for initial render)
 const saved = loadProjectsFallback();
 sanitizeProjects(saved.projects);
 const { projects: savedProjects, activeProjectId: savedActiveId } = saved;
 const activeProject = savedProjects.find((p) => p.projectId === savedActiveId) ?? null;
-const initialCanvas = buildCanvasFromProject(activeProject);
+let initialCanvas: { canvasNodes: BossNode[]; canvasEdges: BossEdge[] };
+try {
+  initialCanvas = buildCanvasFromProject(activeProject);
+} catch (e) {
+  console.warn("[Store] buildCanvasFromProject failed — clearing stale data", e);
+  try { localStorage.removeItem("flowith_projects"); } catch {}
+  initialCanvas = { canvasNodes: [], canvasEdges: [] };
+}
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   projects: savedProjects,
@@ -748,14 +878,35 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ projects: [...get().projects, data.project], activeProjectId: data.project.projectId, project: data.project, canvasNodes: data.canvasNodes, canvasEdges: data.canvasEdges, selectedNodeId: null, rightPanel: null });
   },
 
+  loadDemoInfluencerContent: (lang: "en" | "zh") => {
+    const data = buildInfluencerContentDemo(lang);
+    set({ projects: [...get().projects, data.project], activeProjectId: data.project.projectId, project: data.project, canvasNodes: data.canvasNodes, canvasEdges: data.canvasEdges, selectedNodeId: null, rightPanel: null });
+  },
+
+  loadDemoComfyUI: (lang: "en" | "zh") => {
+    const data = buildComfyUIDemo(lang);
+    set({ projects: [...get().projects, data.project], activeProjectId: data.project.projectId, project: data.project, canvasNodes: data.canvasNodes, canvasEdges: data.canvasEdges, selectedNodeId: null, rightPanel: null });
+  },
+
   loadAllDemos: (lang, models) => {
-    const demos = [
-      buildGameStorylineDemo(lang, models),
-      buildCustomerServiceDemo(lang, models),
-      buildCodeReviewDemo(lang, models),
-      buildMarketingDemo(lang, models),
-      buildDataAnalysisDemo(lang, models),
+    const builders = [
+      buildGameStorylineDemo,
+      buildCustomerServiceDemo,
+      buildCodeReviewDemo,
+      buildMarketingDemo,
+      buildDataAnalysisDemo,
+      buildInfluencerContentDemo,
+      buildComfyUIDemo,
     ];
+    const demos: ReturnType<typeof buildGameStorylineDemo>[] = [];
+    for (const build of builders) {
+      try {
+        demos.push(build(lang, models));
+      } catch (e) {
+        console.warn("Demo builder failed:", (e as Error).message);
+      }
+    }
+    if (demos.length === 0) return;
     const existing = get().projects;
     const first = demos[0];
     set({
@@ -1102,6 +1253,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     _runWorkflowImpl(project, (node) => toReset.has(node.nodeId));
   },
 
+  stopWorkflow: () => {
+    if (_runAbortController) {
+      _runAbortController.abort();
+      _runAbortController = null;
+    }
+  },
+
   // ── Undo / Redo ────────────────────────────────────────────────
 
   undo: () => {
@@ -1375,14 +1533,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ...p, workflow: { nodes: mergedNodes, edges: mergedEdges },
     }));
     const canvas = buildCanvasFromProject({ ...project, workflow: { nodes: mergedNodes, edges: mergedEdges } });
-    // Select pasted nodes
-    const pastedIds = newNodes.map((n) => n.nodeId);
+    // Select ONLY pasted nodes — clear all prior selection to prevent accumulation
+    const pastedIds = new Set(newNodes.map((n) => n.nodeId));
     set({
       projects: updatedProj,
       project: { ...project, workflow: { nodes: mergedNodes, edges: mergedEdges }, updatedAt: new Date().toISOString() },
-      canvasNodes: canvas.canvasNodes,
+      canvasNodes: canvas.canvasNodes.map((cn) => ({ ...cn, selected: pastedIds.has(cn.id) })),
       canvasEdges: canvas.canvasEdges,
-      selectedNodeId: pastedIds.length === 1 ? pastedIds[0] : null,
+      selectedNodeId: newNodes.length === 1 ? newNodes[0].nodeId : null,
     });
   },
 
@@ -1454,6 +1612,9 @@ async function _runWorkflowImpl(
     runProgress: { completed: 0, total: totalCount },
   });
 
+  // Create abort controller for this run
+  _runAbortController = new AbortController();
+
   try {
     const projectSnapshot = { ...useProjectStore.getState().project!, workflow: { ...useProjectStore.getState().project!.workflow, nodes: resetNodes } };
     const updatedNodes = await executeWorkflow(
@@ -1482,6 +1643,7 @@ async function _runWorkflowImpl(
             : useProjectStore.getState().runProgress,
         });
       },
+      _runAbortController?.signal,
     );
 
     // Final update
@@ -1500,11 +1662,13 @@ async function _runWorkflowImpl(
       canvasNodes: finalCanvas,
       isRunning: false,
     });
+    _runAbortController = null;
 
     runGoalValidation();
     saveOutputsToFolder();
   } catch (err: any) {
     useProjectStore.setState({ isRunning: false });
+    _runAbortController = null;
     import("@tauri-apps/plugin-dialog").then(({ message }) => {
       message(`Execution failed:\n${err?.message || err}`, { title: "Flowith Error", kind: "error" }).catch(() => {});
     }).catch(() => {

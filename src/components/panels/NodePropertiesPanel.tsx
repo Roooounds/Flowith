@@ -392,6 +392,97 @@ export default function NodePropertiesPanel() {
                 </div>
               </div>
             )}
+
+            {/* ComfyUI image generation params */}
+            {assignedAgent?.provider === "comfyui" && (() => {
+              const cp = (node.data?.comfyuiParams ?? {}) as Record<string, any>;
+              const setComfy = (k: string, v: any) => {
+                updateNode(node.nodeId, {
+                  data: { ...node.data, comfyuiParams: { ...cp, [k]: v } },
+                });
+              };
+              const hasWorkflow = !!cp.workflowJson;
+              return (
+                <div className="px-3 pb-3 space-y-2 border-b border-boss-border/50">
+                  <p className="text-[10px] font-semibold text-boss-text uppercase tracking-wider">🎨 ComfyUI Settings</p>
+                  {/* Workflow file upload */}
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded border border-dashed border-boss-border hover:border-boss-accent/50 cursor-pointer transition-colors text-[10px] text-boss-text-muted">
+                      <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const text = await file.text();
+                        setComfy("workflowJson", text);
+                        setComfy("_workflowName", file.name);
+                      }} />
+                      <svg className="w-3.5 h-3.5 text-boss-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                      </svg>
+                      <span className="truncate">{cp._workflowName || "Load workflow .json from ComfyUI..."}</span>
+                    </label>
+                    {hasWorkflow && (
+                      <button onClick={() => { setComfy("workflowJson", null); setComfy("_workflowName", null); }}
+                        className="text-[9px] text-boss-error hover:text-boss-error/80 shrink-0">Clear</button>
+                    )}
+                  </div>
+                  {/* Basic params when NO workflow loaded */}
+                  {!hasWorkflow && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] text-boss-text-muted mb-0.5">Width</label>
+                          <select value={cp.width ?? 512} onChange={e => setComfy("width", Number(e.target.value))}
+                            className="w-full px-1.5 py-1 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text">
+                            {[256, 384, 512, 640, 768, 896, 1024].map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-boss-text-muted mb-0.5">Height</label>
+                          <select value={cp.height ?? 512} onChange={e => setComfy("height", Number(e.target.value))}
+                            className="w-full px-1.5 py-1 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text">
+                            {[256, 384, 512, 640, 768, 896, 1024].map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-boss-text-muted mb-0.5">Steps</label>
+                          <select value={cp.steps ?? 20} onChange={e => setComfy("steps", Number(e.target.value))}
+                            className="w-full px-1.5 py-1 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text">
+                            {[8, 12, 16, 20, 25, 30, 40, 50].map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-boss-text-muted mb-0.5">CFG Scale</label>
+                          <select value={cp.cfg_scale ?? 7} onChange={e => setComfy("cfg_scale", Number(e.target.value))}
+                            className="w-full px-1.5 py-1 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text">
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14].map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-boss-text-muted mb-0.5">Seed (-1=random)</label>
+                          <input type="number" value={cp.seed ?? -1} onChange={e => setComfy("seed", Number(e.target.value))}
+                            className="w-full px-1.5 py-1 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-boss-text-muted mb-0.5">Negative Prompt</label>
+                        <textarea value={cp.negative_prompt ?? ""} onChange={e => setComfy("negative_prompt", e.target.value)}
+                          rows={2} placeholder="bad quality, blurry, distorted..."
+                          className="w-full px-2 py-1.5 bg-boss-bg border border-boss-border rounded text-[10px] text-boss-text placeholder:text-boss-text-muted/30 resize-none" />
+                      </div>
+                    </>
+                  )}
+                  {hasWorkflow && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] text-boss-success/70">✓ Custom workflow loaded</p>
+                      <div className="text-[9px] text-boss-text-muted bg-boss-bg/50 rounded p-1.5 leading-relaxed">
+                        <span className="text-boss-accent">Tip:</span> In your workflow's CLIPTextEncode node, write <code className="bg-boss-bg px-0.5 rounded text-boss-text">{"{{prompt}}"}</code> to inject upstream text. Without markers, the system auto-injects into the first positive prompt node.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col">
