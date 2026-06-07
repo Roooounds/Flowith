@@ -9,11 +9,25 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Roooounds/Flowith/actions/workflows/ci.yml"><img src="https://github.com/Roooounds/Flowith/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Roooounds/Flowith/releases"><img src="https://img.shields.io/github/v/release/Roooounds/Flowith" alt="Release" /></a>
+  <a href="https://github.com/Roooounds/Flowith/stargazers"><img src="https://img.shields.io/github/stars/Roooounds/Flowith?style=social" alt="Stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Roooounds/Flowith" alt="License" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Platform" />
+</p>
+
+<p align="center">
   <a href="#-chinese">中文</a> &nbsp;|&nbsp;
   <a href="#features">Features</a> &nbsp;|&nbsp;
   <a href="#quick-start">Quick Start</a> &nbsp;|&nbsp;
   <a href="#architecture">Architecture</a>
 </p>
+
+---
+
+> **🎬 Watch the demo** (coming soon — star the repo to get notified!)
+>
+> <!-- Replace the line above with: <p align="center"><img src="docs/demo.gif" alt="Flowith Demo" width="700" /></p> once the GIF is recorded -->
 
 ---
 
@@ -347,13 +361,39 @@ graph TB
 
 ---
 
+## Contributing
+
+We welcome contributions of all kinds — bug reports, feature requests, code, documentation, translations, and new preset roles.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style guidelines, and how to submit your first PR.
+
+---
+
+## Star History
+
+<a href="https://star-history.com/#Roooounds/Flowith&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Roooounds/Flowith&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Roooounds/Flowith&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Roooounds/Flowith&type=Date" />
+  </picture>
+</a>
+
+---
+
 ## License
 
-MIT — free to use, modify, and share.
+MIT — free to use, modify, and share. See [LICENSE](LICENSE).
 
 ---
 
 <p align="center">
   <strong>Stop chatting with AI. Start orchestrating it.</strong><br>
   <strong>别跟 AI 聊天了。开始编排它。</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Roooounds/Flowith/stargazers">⭐ Star</a> &nbsp;|&nbsp;
+  <a href="https://github.com/Roooounds/Flowith/releases">⬇️ Download</a> &nbsp;|&nbsp;
+  <a href="https://github.com/Roooounds/Flowith/discussions">💬 Discuss</a>
 </p>
