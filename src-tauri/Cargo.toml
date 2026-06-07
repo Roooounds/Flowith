@@ -1,6 +1,6 @@
 [package]
 name = "flowith"
-version = "1.0.0"
+version = "1.0.3"
 description = "Node-based Multi-Agent AI Project Management Workflow"
 authors = ["Flowith"]
 edition = "2021"

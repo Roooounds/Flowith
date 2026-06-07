@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.3 (2026-06-07)
+
+### Features
+- ComfyUI auto-start: app searches multiple paths and launches ComfyUI on startup
+- Execution engine caching enhancements and NodePropertiesPanel improvements
+- i18n updates
+
+### Fixes
+- Resolve 8 clippy warnings (dead_code, too_many_arguments, checked_div, etc.)
+- Format Rust code, fix frontend test mock regressions
+- Downgrade vitest 4 → 3 to resolve vite@5 module-runner export error
+
+### Docs
+- Add badges, LICENSE, CONTRIBUTING.md, issue templates
+- Promo copy for community sharing
+
 ## v1.0.0 (2026-05-25)
 
 Initial release of Flowith — a node-based multi-agent AI workflow manager.
